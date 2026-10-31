@@ -1,0 +1,20 @@
+[workspace]
+members = ["crates/posse-core", "crates/posse-shm"]
+
+[package]
+name = "mq2-posse"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+name = "MQ2Posse"        # becomes MQ2Posse.dll
+crate-type = ["cdylib"]
+test = false             # a plugin links MacroQuest, so a test binary can't start outside the game
+doctest = false
+
+[dependencies]
+mq-emu = { git = "https://github.com/dotsyzygy/mq-emu-rs", tag = "v0.1.1" }
+posse-core = { path = "crates/posse-core" }
+posse-shm = { path = "crates/posse-shm" }
