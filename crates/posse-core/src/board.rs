@@ -9,11 +9,12 @@ use std::fmt;
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicU32, Ordering, fence};
 
+use crate::commands::CommandLog;
 use crate::status::{STATUS_WORDS, Status};
 
 /// Clients with a different layout refuse to share a block. Change this with
-/// any change to [`Region`] or [`Status`].
-pub const LAYOUT_VERSION: u32 = 0x5053_0001;
+/// any change to [`Region`], [`Status`] or the command log.
+pub const LAYOUT_VERSION: u32 = 0x5053_0002;
 pub const MAX_CLIENTS: usize = 64;
 pub const REGION_SIZE: usize = size_of::<Region>();
 
@@ -40,7 +41,7 @@ pub trait Liveness {
 
 /// A slot's position in the block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SlotId(usize);
+pub struct SlotId(pub(crate) usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttachError {
@@ -72,6 +73,7 @@ struct Slot {
     /// 0 before the first publish, odd during a write.
     sequence: AtomicU32,
     status: [AtomicU32; STATUS_WORDS],
+    commands: CommandLog,
 }
 
 #[repr(C)]
@@ -170,6 +172,10 @@ impl Region {
             }
         }
         None
+    }
+
+    pub(crate) fn log(&self, id: SlotId) -> &CommandLog {
+        &self.slots[id.0].commands
     }
 
     /// Slots that have an owner, with their owners.

@@ -49,6 +49,7 @@ pub fn collect(mq: &Mq<Posse>, status: &mut Status, zoning: bool) {
     status.target_id = mq.target().map_or(0, |target| target.id().0);
     if let Some(zone) = mq.zone() {
         status.set_zone(&zone.short_name());
+        status.zone_instance = u32::from(zone.instance());
     }
 
     status.flags = FLAGS.iter().filter(|(path, _)| is_true(mq, path)).fold(0, |all, (_, flag)| all | flag);

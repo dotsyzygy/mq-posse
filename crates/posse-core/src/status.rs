@@ -72,6 +72,8 @@ pub struct Status {
     pub target_id: u32,
     pub pet_id: u32,
     pub pet_hp_percent: i32,
+    /// 0 outside instances.
+    pub zone_instance: u32,
     name: [u8; NAME_LEN],
     pet_name: [u8; NAME_LEN],
     zone: [u8; ZONE_LEN],
@@ -110,6 +112,7 @@ impl Default for Status {
             target_id: 0,
             pet_id: 0,
             pet_hp_percent: 0,
+            zone_instance: 0,
             name: [0; NAME_LEN],
             pet_name: [0; NAME_LEN],
             zone: [0; ZONE_LEN],
@@ -227,7 +230,7 @@ mod tests {
 
     #[test]
     fn has_no_padding() {
-        let fields = 23 * 4 + NAME_LEN * 2 + ZONE_LEN + (MAX_BUFFS + MAX_SONGS) * size_of::<BuffEntry>();
+        let fields = 24 * 4 + NAME_LEN * 2 + ZONE_LEN + (MAX_BUFFS + MAX_SONGS) * size_of::<BuffEntry>();
         assert_eq!(size_of::<Status>(), fields);
     }
 

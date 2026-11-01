@@ -41,10 +41,23 @@ game.
 ### 2. Messages and commands
 
 - [ ] `/posse tell`, the inbox and `/posse next`
-- [ ] `/posse cmd` to a name, `group`, `others` or `all`
-- [ ] Completion tracking in `${Posse.LastCommand}`, with a 5 second timeout
-- [ ] `AllowCommands` setting in `MQ2Posse.ini`
-- [ ] Reporting a full queue to the sender
+- [x] `/pc`, `/pca`, `/pgc`, `/pgca`, `/prc`, `/prca`, `/pzc` and `/pzca`, tested outside the game
+- [x] All eight run in game on three clients, in a group and a raid
+- [x] Measure how long commands take to arrive: 2 to 103 ms over 7 samples, from the debug log
+- [x] `/pzc` and `/pzca` in game, including instances
+- [x] `AllowCommands=0` refusing a command in game
+- [ ] Seen in game as they come up, since they're hard to set up on purpose: a command dropped after
+      5 seconds, and lost commands. Tests outside the game cover both
+- [x] `/posse help`, with a test that every command in it is in the README
+- [x] `AllowCommands` setting in `MQ2Posse.ini`
+- [x] `/posse debug on` and `off`, showing what's sent and received in game, and `Debug` in
+      `MQ2Posse.ini` keeping it on through a reload
+- [x] Dropping a command after 5 seconds, and saying so on the client that dropped it
+- [x] A client saying so when commands were overwritten before it read them
+- [ ] `/posse cmd` to a name
+- [ ] Completion tracking in `${Posse.LastCommand}`, which can also tell the sender about dropped and
+      lost commands
+- [ ] Named groupings of clients, like DanNet's channels, and commands sent to a grouping
 
 ### 3. Generic `Me` passthrough
 
@@ -58,7 +71,10 @@ Built on mq-emu's `DataTypeDef::any_member`.
 - [ ] Requests and results in the owner's slot, with path validation (relative to `Me`, no `${`)
 - [ ] Per-pulse evaluation budget, with each path re-evaluated no more often than every
       `max(10 x its evaluation cost, 100 ms)`
-- [ ] `/posse observe`, `/posse unobserve` and dropping paths unread for 30 seconds
+- [ ] Reading a path starts evaluating it, with no separate command for that
+- [ ] Paths unread for 30 seconds stop being evaluated but keep their last value, and the next read
+      returns that value and starts evaluating again
+- [ ] A way for a macro to see how old a path's value is, since `.Age` only covers the member's status
 
 ### 4. Hardening
 
@@ -66,8 +82,9 @@ Built on mq-emu's `DataTypeDef::any_member`.
       crate can't run tests outside the game; failure cases are permanent negative tests
 - [x] Tests of the shared memory between real processes: killing a client, reusing its slot, and
       mappings from another build
-- [ ] The same for queues and path validation, with phases 2 and 3
-- [ ] In-game checks with several clients: reloading the plugin on one client, a full queue, a
+- [x] The same for commands
+- [ ] The same for message queues and path validation, with phases 2 and 3
+- [ ] In-game checks with several clients: reloading the plugin on one client, a burst of commands, a
       mismatched build
 - [x] A check with one client limited to a low frame rate
 

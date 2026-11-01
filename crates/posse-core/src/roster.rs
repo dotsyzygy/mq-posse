@@ -1,6 +1,7 @@
 //! Who's in the block right now.
 
 use crate::board::{Liveness, Owner, Region, SlotId};
+use crate::commands::{Audience, Targets};
 use crate::status::Status;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +56,17 @@ impl Roster {
         let status = region.read(member.slot).unwrap_or(member.status);
         status.name().eq_ignore_ascii_case(name).then_some(status)
     }
+
+    /// The members in an audience, other than `me`.
+    pub fn targets(&self, region: &Region, me: Owner, audience: &Audience) -> Targets {
+        let mut targets = Targets::default();
+        for member in self.members.iter().filter(|member| member.owner != me) {
+            if audience.includes(&region.read(member.slot).unwrap_or(member.status)) {
+                targets.add(member.slot);
+            }
+        }
+        targets
+    }
 }
 
 #[cfg(test)]
@@ -68,6 +80,26 @@ mod tests {
         status.set_name(name);
         region.publish(slot, &status);
         slot
+    }
+
+    #[test]
+    fn targets_are_the_audience_without_the_sender() {
+        let mut memory = zeroed_memory();
+        let region = region(&mut memory);
+        let (alice, bob) = (join(region, 1, "Alice"), join(region, 2, "Bob"));
+        let carol = join(region, 3, "Carol");
+        let mut roster = Roster::default();
+        roster.refresh(region, &mut Dead::default());
+
+        let all = roster.targets(region, owner(1), &Audience::All);
+        assert!(!all.contains(alice) && all.contains(bob) && all.contains(carol));
+
+        let names = vec!["alice".to_owned(), "bob".to_owned(), "Merc".to_owned()];
+        let group = roster.targets(region, owner(1), &Audience::Names(names));
+        assert!(!group.contains(alice) && group.contains(bob) && !group.contains(carol));
+
+        let alone = roster.targets(region, owner(1), &Audience::Names(vec!["Alice".to_owned()]));
+        assert!(alone.is_empty());
     }
 
     #[test]

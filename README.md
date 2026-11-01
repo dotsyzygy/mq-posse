@@ -4,8 +4,10 @@ A MacroQuest plugin that lets EverQuest clients on the same PC see each other's 
 each other messages and commands. It adds a `Posse` TLO to macros and Lua.
 
 > **Status: early.** Joining a posse, status, the `Posse` TLO and `/posse list`, `join`, `leave` and
-> `stats` are built and have run on two clients. Messages, commands between clients and reading
-> `Me` members outside the always-ready list aren't yet, and this README describes them as designed.
+> `stats` are built and have run on two clients. `/pc` and the other commands that run on your clients
+> have run in game on three clients. Messages, `/posse cmd` to a name,
+> `${Posse.LastCommand}` and reading `Me` members outside the always-ready list aren't built, and this
+> README describes them as designed.
 > See [docs/status.md](docs/status.md) for what exists and what's missing.
 
 It's built on [mq-emu](https://github.com/dotsyzygy/mq-emu-rs), so it runs only on emulator servers
@@ -56,35 +58,54 @@ user, at the same elevation and outside any sandbox. A client that can't join sa
 
 | Command | What it does |
 |---|---|
-| `/posse` or `/posse list` | Lists members with their state and data age |
-| `/posse join <name>` | Leaves the current posse and joins `<name>`, until you next go to character select |
-| `/posse leave` | Leaves the posse until the next `/posse join` |
+| `/posse help` | Lists these commands |
+| `/posse list` | Lists members with their state and data age, as does /posse alone |
+| `/posse join <name>` | Leaves the current posse and joins that one, until you next go to character select |
+| `/posse leave` | Leaves the posse until the next /posse join |
 | `/posse tell <target> <text>` | Puts a message in the target's inbox |
-| `/posse cmd <target> <command>` | Runs a command on the target |
+| `/posse cmd <name> <command>` | Runs a command on that character |
 | `/posse next` | Removes the oldest message from your inbox |
-| `/posse observe <name> <path>` | Starts keeping a `Me` path from that member up to date |
-| `/posse unobserve <name> <path>` | Stops keeping it up to date |
-| `/posse stats` | Shows what publishing status costs this client per pulse, and how old each member's status has been |
+| `/posse debug on` | Says in chat what this client sends and receives, and keeps doing so for this character |
+| `/posse debug off` | Stops saying that |
+| `/posse stats` | Shows what publishing status costs this client per pulse, how old each member's status has been, and how long commands took to reach this client |
 | `/posse stats reset` | Starts those numbers again |
 
-`<target>` is one of:
+`/posse help` lists the commands that work so far, including the ones below.
 
-| Target | Who it reaches |
+### Running a command on your other clients
+
+In these names, `p` means posse, `c` command, `a` all including you, `g` group, `r` raid and `z` zone.
+
+| Command | What it does |
 |---|---|
-| A character name | That character |
-| `group` | Posse members in your group, not you |
-| `others` | Every other member |
-| `all` | Every member, including you |
+| `/pc <command>` | Runs a command on every connected client except you |
+| `/pca <command>` | Runs a command on every connected client, including you |
+| `/pgc <command>` | Runs a command on every client in your group except you |
+| `/pgca <command>` | Runs a command on every client in your group, including you |
+| `/prc <command>` | Runs a command on every client in your raid except you, your group included |
+| `/prca <command>` | Runs a command on every client in your raid, including you |
+| `/pzc <command>` | Runs a command on every client in your zone except you |
+| `/pzca <command>` | Runs a command on every client in your zone, including you |
 
 For example:
 
 ```
-/posse cmd others /stand
-/posse cmd Bob /target id ${Me.ID}
+/pc /stand
+/pgca /sit
+/pzc /target id ${Me.ID}
 ```
 
 As usual in MacroQuest, `${...}` in a command is expanded on the client that sends it. Here,
 `${Me.ID}` is the sender's ID.
+
+- The command must start with `/`.
+- Who's in your group or raid is decided by your client when you send. Outside a group or raid,
+  `/pgc`, `/pgca`, `/prc` and `/prca` say so and run nothing, on you included.
+- `/prc` and `/prca` don't fall back to your group if you're grouped but not in a raid.
+- Your zone means the same instance of it, and leaves out clients on a load screen.
+- A client on a load screen runs what it was sent when it arrives. If that's over 5 seconds after
+  the command was sent, it doesn't run it, and says so in its chat.
+- A client with `AllowCommands=0` refuses the command and says so in its own chat. The sender isn't told.
 
 ## The Posse TLO
 
@@ -147,16 +168,17 @@ MacroQuest's real `spell` values. Your own entry reads what you last published, 
 the owning client to start evaluating that path. Its value arrives shortly after and is then kept up
 to date. Lua can read only the member names on a list built from MacroQuest's types, which covers
 MacroQuest's own members but not ones another plugin adds. To have a value ready before you need it,
-observe it first:
+read it once first and ignore the result:
 
 ```
-/posse observe Bob AltAbilityReady[Divine Arbitration]
+/varset ignored ${Posse[Bob].AltAbilityReady[Divine Arbitration]}
 /delay 5
 /echo ${Posse[Bob].AltAbilityReady[Divine Arbitration]}
 ```
 
-A path nothing has read for 30 seconds stops being evaluated, and observed paths stay active until
-`/posse unobserve`. Paths are relative to `Me` and can't contain `${`.
+A path nothing has read for 30 seconds stops being evaluated, but its last value is kept. The next
+read returns that value, which may be out of date, and starts evaluating the path again. Paths are
+relative to `Me` and can't contain `${`.
 
 ### In a macro
 
@@ -202,7 +224,10 @@ bool if that's what they are, so check for nil on those.
 |---|---|---|
 | `Posse` | `default` | Posse to join on entering the game |
 | `AutoJoin` | `1` | `0` waits for `/posse join` |
-| `AllowCommands` | `1` | `0` refuses `/posse cmd` from others, and senders see it time out |
+| `AllowCommands` | `1` | `0` refuses commands from others, saying so in this client's chat |
+| `Debug` | `off` | `on` says in chat what this client sends and receives. `/posse debug` sets this under `[Server_Character]`, creating the file if needed |
+
+Errors always show in chat, whether or not `Debug` is on.
 
 ## Limits
 
@@ -210,10 +235,12 @@ bool if that's what they are, so check for nil on those.
 |---|---|
 | Clients in one posse | 64 |
 | Posses per client | 1 |
-| Message or command length | 512 bytes |
+| Message length | 512 bytes |
+| Command length | 2047 bytes, the most MacroQuest takes in a line |
 | Queued messages per client | 16; further sends fail with a chat message |
-| Queued commands per client | 16; further sends fail with a chat message |
-| Observed or read paths per client | 64 |
+| Commands a client can send before others read them | 16; past that the oldest are lost, and a client that lost any says so in its chat |
+| Age of a command that will still run | 5 seconds |
+| Read paths per client | 64 |
 | Path length | 128 bytes |
 
 ## How it works
@@ -223,9 +250,10 @@ client writes only to its own slot, and publishes its status once per game pulse
 latest published values straight from that slot whenever a macro asks, without any message passing.
 A sequence counter makes sure a reader never sees a half-written update.
 
-Messages and commands go into the target's slot and run on the target's next pulse, on the game
-thread. So do `Me` paths that aren't in the always-ready list, because only the owning client can
-evaluate them.
+A command goes into a log in the sender's own slot, addressed to the slots it's for, and each target
+picks it up on its next pulse and runs it on the game thread. Messages go into the target's slot and
+are read the same way. So do `Me` paths that aren't in the always-ready list, because only the owning
+client can evaluate them.
 
 ## How fast it is
 
@@ -239,8 +267,10 @@ How old a member's status was when read, measured in game with two clients over 
 So status is never more than about one frame of the owning client behind, and the frame rate of the
 client reading it doesn't matter. Publishing cost 27 to 30 µs per pulse on average, and 563 µs at worst.
 
-These are still design estimates, not measurements: a command should start running within one frame
-of the client receiving it, getting a value from shared memory should take well under a microsecond
+Commands took 2 to 103 ms to reach another client, over 7 samples in game with three clients. A command
+that goes to the server, such as `/say`, then takes as long as the server does.
+
+These are still design estimates, not measurements: getting a value from shared memory should take well under a microsecond
 on top of MacroQuest's usual cost of parsing a `${...}`, and each client's work per pulse should stay
 about the same however many clients are in the posse.
 
