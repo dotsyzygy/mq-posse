@@ -130,59 +130,125 @@ pub static ALIASES: [Alias; 11] = [
     },
 ];
 
-/// The `/posse` subcommands that work so far, as `/posse help` lists them.
-pub const SUBCOMMANDS: [(&str, &str); 15] = [
-    ("/posse help", "Lists these commands"),
+/// A group of commands that `/posse help <topic>` lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpTopic {
+    Posse,
+    Channel,
+    Settings,
+    /// The aliases that send commands to other clients, from [`ALIASES`].
+    Command,
+}
+
+impl HelpTopic {
+    pub const ALL: [HelpTopic; 4] = [HelpTopic::Posse, HelpTopic::Channel, HelpTopic::Settings, HelpTopic::Command];
+
+    /// As typed after `/posse help`.
+    pub fn name(self) -> &'static str {
+        match self {
+            HelpTopic::Posse => "posse",
+            HelpTopic::Channel => "channel",
+            HelpTopic::Settings => "settings",
+            HelpTopic::Command => "command",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            HelpTopic::Posse => "Listing members, and joining and leaving posses",
+            HelpTopic::Channel => "Creating, deleting, joining and leaving channels",
+            HelpTopic::Settings => "Debugging, allowing commands, and stats",
+            HelpTopic::Command => "Running commands on other clients",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<HelpTopic> {
+        HelpTopic::ALL.into_iter().find(|topic| topic.name().eq_ignore_ascii_case(name))
+    }
+}
+
+/// `/posse help` itself, which lists the topics rather than belonging to one.
+pub const HELP: [(&str, &str); 3] = [
+    ("/posse help", "Lists the help topics"),
+    ("/posse help all", "Lists every command"),
     (
+        "/posse help <topic>",
+        "Lists the commands for that topic: posse, channel, settings or command",
+    ),
+];
+
+/// The `/posse` subcommands that work so far, by the topic `/posse help` lists them under.
+pub const SUBCOMMANDS: [(HelpTopic, &str, &str); 14] = [
+    (
+        HelpTopic::Posse,
         "/posse list",
         "Lists members with their state and data age, as does /posse alone",
     ),
     (
+        HelpTopic::Posse,
         "/posse join <name>",
         "Leaves the current posse and joins that one, until you next go to character select",
     ),
     (
+        HelpTopic::Posse,
         "/posse leave",
         "Leaves the posse until the next /posse join",
     ),
     (
+        HelpTopic::Channel,
         "/posse channel list",
         "Lists every channel and who's in it, as does /posse channel alone",
     ),
     (
+        HelpTopic::Channel,
         "/posse channel create <name>",
         "Creates a channel, which stays until it's deleted",
     ),
     (
+        HelpTopic::Channel,
         "/posse channel delete <name>",
         "Deletes a channel once nobody online is in it",
     ),
     (
+        HelpTopic::Channel,
         "/posse channel join <name>",
         "Puts this character in a channel, and keeps it there",
     ),
     (
+        HelpTopic::Channel,
         "/posse channel leave <name>",
         "Takes this character out of a channel, and keeps it out",
     ),
     (
+        HelpTopic::Settings,
         "/posse debug on",
         "Logs debugging information to the MQ console for this character",
     ),
-    ("/posse debug off", "Turns off debugging"),
     (
+        HelpTopic::Settings,
+        "/posse debug off",
+        "Turns off debugging",
+    ),
+    (
+        HelpTopic::Settings,
         "/posse allowcommands true",
         "Runs commands other clients send, and keeps doing so for this character",
     ),
     (
+        HelpTopic::Settings,
         "/posse allowcommands false",
         "Refuses commands other clients send, and keeps doing so for this character",
     ),
     (
+        HelpTopic::Settings,
         "/posse stats",
         "Shows publishing costs for client per pulse, member status age, and how long commands took to reach this client",
     ),
-    ("/posse stats reset", "Reset the stats"),
+    (
+        HelpTopic::Settings,
+        "/posse stats reset",
+        "Reset the stats",
+    ),
 ];
 
 /// Which members a command is for, as the sender sees them.
@@ -1292,12 +1358,32 @@ mod tests {
         let aliases = ALIASES
             .iter()
             .map(|alias| (alias.usage(), alias.description));
-        let subcommands = SUBCOMMANDS
+        let subcommands = HELP
             .iter()
-            .map(|(usage, description)| ((*usage).to_owned(), *description));
+            .copied()
+            .chain(SUBCOMMANDS.iter().map(|&(_, usage, description)| (usage, description)))
+            .map(|(usage, description)| (usage.to_owned(), description));
         for (usage, description) in aliases.chain(subcommands) {
             let row = format!("| `{usage}` | {description} |");
             assert!(readme_rows.contains(&row), "the README needs the row: {row}");
+        }
+    }
+
+    #[test]
+    fn every_help_topic_parses_from_its_name_in_any_case_and_others_do_not() {
+        for topic in HelpTopic::ALL {
+            assert_eq!(HelpTopic::parse(topic.name()), Some(topic));
+            assert_eq!(HelpTopic::parse(&topic.name().to_ascii_uppercase()), Some(topic));
+        }
+        assert_eq!(HelpTopic::parse("all"), None);
+        assert_eq!(HelpTopic::parse("chan"), None);
+    }
+
+    #[test]
+    fn every_topic_but_command_has_subcommands_and_command_has_none() {
+        for topic in HelpTopic::ALL {
+            let count = SUBCOMMANDS.iter().filter(|(t, ..)| *t == topic).count();
+            assert_eq!(count == 0, topic == HelpTopic::Command, "{topic:?} has {count}");
         }
     }
 

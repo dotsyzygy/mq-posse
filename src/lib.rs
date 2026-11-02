@@ -6,8 +6,8 @@ mod tlo;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use mq_emu::{GameState, Ini, IniError, Mq, Plugin, Value};
-use posse_core::{ALIASES, Alias, Answer, Audience, Complaints, Delivery, Inbox, LastCommand, Owner, Roster, SUBCOMMANDS, Scope, SlotId, State, Status, Tally, COMMAND_TIMEOUT_MS, mapping_name, validate_channel_name, validate_posse_name};
+use mq_emu::{green, red, teal, yellow, GameState, Ini, IniError, Mq, Plugin, Value};
+use posse_core::{ALIASES, Alias, Answer, Audience, Complaints, Delivery, HELP, HelpTopic, Inbox, LastCommand, Owner, Roster, SUBCOMMANDS, Scope, SlotId, State, Status, Tally, COMMAND_TIMEOUT_MS, mapping_name, validate_channel_name, validate_posse_name};
 
 use posse_shm::{Mapping, Processes, now_ms, this_process};
 use tlo::Types;
@@ -15,7 +15,7 @@ use tlo::Types;
 const COMMAND: &str = "/posse";
 const DEFAULT_POSSE: &str = "default";
 const DEFAULT_SECTION: &str = "Default";
-const USAGE: &str = "usage: /posse [help | list | join <name> | leave | channel [list | create|delete|join|leave <name>] | allowcommands true|false | debug on|off | stats [reset]]";
+const USAGE: &str = "usage: /posse [help [all | <topic>] | list | join <name> | leave | channel [list | create|delete|join|leave <name>] | allowcommands true|false | debug on|off | stats [reset]]";
 const CHANNEL_USAGE: &str = "usage: /posse channel [list | create <name> | delete <name> | join <name> | leave <name>]";
 const SETTINGS_FILE: &str = "MQ2Posse.ini";
 /// The key in a character's section listing the channels it's in.
@@ -405,7 +405,7 @@ impl Posse {
         let (command, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
         match command.to_ascii_lowercase().as_str() {
             "" | "list" => self.list(mq),
-            "help" => print_help(mq),
+            "help" => print_help(mq, rest.trim()),
             "debug" if rest.trim().eq_ignore_ascii_case("on") => self.set_debug(mq, true),
             "debug" if rest.trim().eq_ignore_ascii_case("off") => self.set_debug(mq, false),
             "debug" => mq.chat(format!("[Posse] debug logging is {}. usage: /posse debug on|off", if self.debug { "on" } else { "off" })),
@@ -654,14 +654,57 @@ fn run(mq: &Mq<Posse>, line: &str) -> bool {
     taken
 }
 
-fn print_help(mq: &Mq<Posse>) {
-    mq.chat("[Posse] commands:");
-    for (usage, description) in SUBCOMMANDS {
-        mq.chat(format!("  {usage}: {description}"));
+/// `/posse help [all | <topic>]`.
+fn print_help(mq: &Mq<Posse>, topic: &str) {
+    match topic {
+        "" => {
+            mq.chat(format!("[Posse] {}", yellow!("help topics:")));
+            for (usage, description) in HELP.iter().take(2) {
+                print_command(mq, usage, description);
+            }
+            for topic in HelpTopic::ALL {
+                print_command(mq, &format!("/posse help {}", topic.name()), topic.description());
+            }
+        }
+        _ if topic.eq_ignore_ascii_case("all") => {
+            mq.chat(format!("[Posse] {}", yellow!("help:")));
+            for (usage, description) in HELP {
+                print_command(mq, usage, description);
+            }
+            for topic in HelpTopic::ALL {
+                print_topic(mq, topic);
+            }
+        }
+        _ => match HelpTopic::parse(topic) {
+            Some(topic) => print_topic(mq, topic),
+            None => {
+                mq.chat(format!("[Posse] {} isn't a help topic", red!("{topic}")));
+                print_help(mq, "");
+            }
+        },
     }
-    for alias in &ALIASES {
-        mq.chat(format!("  {}: {}", alias.usage(), alias.description));
+}
+
+fn print_topic(mq: &Mq<Posse>, topic: HelpTopic) {
+    mq.chat(format!("[Posse] {}", yellow!("{} commands:", topic.name())));
+    if topic == HelpTopic::Command {
+        for alias in &ALIASES {
+            print_command(mq, &alias.usage(), alias.description);
+        }
     }
+    for (_, usage, description) in SUBCOMMANDS.iter().filter(|(t, ..)| *t == topic) {
+        print_command(mq, usage, description);
+    }
+}
+
+/// The command in green and its arguments in teal, so each line's command
+/// stands out from the description that wraps under it.
+fn print_command(mq: &Mq<Posse>, usage: &str, description: &str) {
+    let usage = match usage.find('<') {
+        Some(at) => format!("{}{}", green!("{}", usage[..at].trim_end()), teal!(" {}", &usage[at..])),
+        None => green!("{usage}"),
+    };
+    mq.chat(format!("  {usage}: {description}"));
 }
 
 mq_emu::plugin!(Posse);

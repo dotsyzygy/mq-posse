@@ -57,7 +57,9 @@ user, at the same elevation and outside any sandbox. A client that can't join sa
 
 | Command                        | What it does                                                                                                    |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `/posse help`                  | Lists these commands                                                                                            |
+| `/posse help` | Lists the help topics |
+| `/posse help all` | Lists every command |
+| `/posse help <topic>` | Lists the commands for that topic: posse, channel, settings or command |
 | `/posse list`                  | Lists members with their state and data age, as does /posse alone                                               |
 | `/posse join <name>`           | Leaves the current posse and joins that one, until you next go to character select                              |
 | `/posse leave`                 | Leaves the posse until the next /posse join                                                                     |
