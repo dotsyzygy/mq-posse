@@ -70,7 +70,7 @@ Built on mq-emu's `DataTypeDef::any_member`.
 - [x] Tests of the shared memory between real processes: killing a client, reusing its slot, and mappings from another build
 - [x] The same for commands
 - [x] The same for path validation, with phase 3
-- [ ] In-game checks with several clients: reloading the plugin on one client, a burst of commands, a mismatched build
+- [x] In-game checks with three clients: reloading the plugin on one client and a burst of commands, which found `.Lost` counting lost commands once per target. A mismatched build is covered only by the tests between real processes, as two builds of the plugin can't be loaded in game at once without renaming the loaded DLL
 - [x] A check with one client limited to a low frame rate
 
 ## Missing
