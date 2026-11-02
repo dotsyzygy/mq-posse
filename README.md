@@ -1,7 +1,6 @@
 # MQ2Posse
 
-A MacroQuest plugin that lets EverQuest clients on the same PC see each other's status and send
-each other commands. It adds a `Posse` TLO to macros and Lua.
+A MacroQuest plugin that lets EverQuest clients on the same PC see each other's status and send each other commands. It adds a `Posse` TLO to macros and Lua.
 
 > **Status: early.** Joining a posse, status, the `Posse` TLO and `/posse list`, `join`, `leave` and
 > `stats` are built and have run on two clients. The commands that run on your clients have run in game
@@ -9,31 +8,23 @@ each other commands. It adds a `Posse` TLO to macros and Lua.
 > outside the always-ready list isn't built, and this README describes it as designed.
 > See [docs/status.md](docs/status.md) for what exists and what's missing.
 
-It's built on [mq-emu](https://github.com/dotsyzygy/mq-emu-rs), so it runs only on emulator servers
-with the RoF2 client (MacroQuest's `emu` branch, 32-bit).
+It's built on [mq-emu](https://github.com/dotsyzygy/mq-emu-rs), so it runs only on emulator servers with the RoF2 client (MacroQuest's `emu` branch, 32-bit).
 
-**One PC only.** Posse doesn't work over a LAN or the internet. It adds no network traffic and opens
-no ports.
+**One PC only.** Posse doesn't work over a LAN or the internet. It adds no network traffic and opens no ports.
 
 ## What it does
 
-- **Finds your other clients:** every client on the PC with the same server and posse name joins
-  automatically.
-- **Shows each client's status:** read another character's HP, mana, buffs, position and more from
-  any client, as that character's own client reports them.
-- **Reads almost anything else:** ask for any `Me` member not in the built-in set, and the owning
-  client evaluates it and keeps it updated.
+- **Finds your other clients:** every client on the PC with the same server and posse name joins automatically.
+- **Shows each client's status:** read another character's HP, mana, buffs, position and more from any client, as that character's own client reports them.
+- **Reads almost anything else:** ask for any `Me` member not in the built-in set, and the owning client evaluates it and keeps it updated.
 - **Sends commands:** to one character, your group, a named channel or the whole posse.
-- **Says how fresh the data is:** every member reports how old its data is and whether it's gone
-  stale.
+- **Says how fresh the data is:** every member reports how old its data is and whether it's gone stale.
 
-Unlike `${Spawn[Bob]}` or `${Group}`, this data comes from Bob's own client, so it works across zones
-and includes things other clients can't see, such as Bob's exact mana and full buff list.
+Unlike `${Spawn[Bob]}` or `${Group}`, this data comes from Bob's own client, so it works across zones and includes things other clients can't see, such as Bob's exact mana and full buff list.
 
 ## Install
 
-You need Rust with the `i686-pc-windows-msvc` target, `MQ_ROOT` pointing at your MacroQuest checkout,
-and `cargo-mq`:
+You need Rust with the `i686-pc-windows-msvc` target, `MQ_ROOT` pointing at your MacroQuest checkout, and `cargo-mq`:
 
 ```
 cargo install --git https://github.com/dotsyzygy/mq-emu-rs cargo-mq
@@ -47,11 +38,9 @@ Then load it on **every** client that should take part:
 /plugin MQ2Posse
 ```
 
-All clients must run the same build of the plugin. A client with a different build refuses to join
-and says why, so to upgrade, unload the plugin everywhere first.
+All clients must run the same build of the plugin. A client with a different build refuses to join and says why, so to upgrade, unload the plugin everywhere first.
 
-All clients must also be able to open the same shared memory, so run them under the same Windows
-user, at the same elevation and outside any sandbox. A client that can't join says so in chat.
+All clients must also be able to open the same shared memory, so run them under the same Windows user, at the same elevation and outside any sandbox. A client that can't join says so in chat.
 
 ## Commands
 
@@ -79,9 +68,7 @@ user, at the same elevation and outside any sandbox. A client that can't join sa
 
 ### Running a command on your other clients
 
-In these names, `p` means posse, `c` command, `g` group, `r` raid, `z` zone, `n` a named channel, and a
-final `a` all including you. `/pc` alone is to one character, so `/pca` is to all of them except you, and
-`/pcaa` to all of them including you.
+In these names, `p` means posse, `c` command, `g` group, `r` raid, `z` zone, `n` a named channel, and a final `a` all including you. `/pc` alone is to one character, so `/pca` is to all of them except you, and `/pcaa` to all of them including you.
 
 | Command                     | What it does                                                                  |
 | --------------------------- | ----------------------------------------------------------------------------- |
@@ -107,25 +94,19 @@ For example:
 /pnca healers /stand
 ```
 
-As usual in MacroQuest, `${...}` in a command is expanded on the client that sends it. Here,
-`${Me.ID}` is the sender's ID.
+As usual in MacroQuest, `${...}` in a command is expanded on the client that sends it. Here, `${Me.ID}` is the sender's ID.
 
 - The command must start with `/`.
-- Who's in your group or raid is decided by your client when you send. Outside a group or raid,
-  `/pgc`, `/pgca`, `/prc` and `/prca` say so and run nothing, on you included.
+- Who's in your group or raid is decided by your client when you send. Outside a group or raid, `/pgc`, `/pgca`, `/prc` and `/prca` say so and run nothing, on you included.
 - `/prc` and `/prca` don't fall back to your group if you're grouped but not in a raid.
 - Your zone means the same instance of it, and leaves out clients on a load screen.
-- A client on a load screen runs what it was sent when it arrives. If that's over 5 seconds after
-  the command was sent, it doesn't run it, and says so in its chat.
-- A client with `AllowCommands=false` refuses the command and says so in its own chat. The sender sees it in
-  `${Posse.LastCommand.Refused}`.
-- `/pc` can name your own character. Naming a character not in the posse says so and sends
-  nothing, as does sending to a channel that doesn't exist.
+- A client on a load screen runs what it was sent when it arrives. If that's over 5 seconds after the command was sent, it doesn't run it, and says so in its chat.
+- A client with `AllowCommands=false` refuses the command and says so in its own chat. The sender sees it in `${Posse.LastCommand.Refused}`.
+- `/pc` can name your own character. Naming a character not in the posse says so and sends nothing, as does sending to a channel that doesn't exist.
 
 ### Finding out what happened to a command
 
-`${Posse.LastCommand}` follows the last command you sent with any of these, and each target of it is in
-one of its counts:
+`${Posse.LastCommand}` follows the last command you sent with any of these, and each target of it is in one of its counts:
 
 ```
 /pc Bob /sit
@@ -133,15 +114,11 @@ one of its counts:
 /if (${Posse.LastCommand.Done}!=${Posse.LastCommand.Targets}) /echo Bob didn't run it
 ```
 
-A client that drops a command you sent, because it reached it over 5 seconds after you sent it, tells you
-in your chat, for any command and not only the last. So does one that lost commands you sent, by not
-reading them before you'd sent 16 more. It can't tell whether those were addressed to it, so they may not
-all have been meant for it.
+A client that drops a command you sent, because it reached it over 5 seconds after you sent it, tells you in your chat, for any command and not only the last. So does one that lost commands you sent, by not reading them before you'd sent 16 more. It can't tell whether those were addressed to it, so they may not all have been meant for it.
 
 ### Channels
 
-A channel is a name for some of your clients, shared by the whole posse: any client can create one, join
-one, and send to one. Create it once, then have each client join:
+A channel is a name for some of your clients, shared by the whole posse: any client can create one, join one, and send to one. Create it once, then have each client join:
 
 ```
 /posse channel create healers
@@ -149,15 +126,11 @@ one, and send to one. Create it once, then have each client join:
 /pnc healers /sit
 ```
 
-- A channel and each client's place in it are saved in `MQ2Posse.ini`, so they come back when the clients
-  do. A channel stays with nobody in it, until it's deleted.
+- A channel and each client's place in it are saved in `MQ2Posse.ini`, so they come back when the clients do. A channel stays with nobody in it, until it's deleted.
 - Channels belong to one posse on one server. Names are 1 to 31 letters, digits, `-` or `_`, in any case.
-- Joining a channel that doesn't exist says so instead of creating it, so that a typo can't make a second
-  channel. For the same reason, `/pnc` to a channel that doesn't exist doesn't send anything.
-- To take another character out of a channel, run the command on it:
-  `/pc Bob /posse channel leave healers`.
-- A channel with members online can't be deleted. A member who's offline when it's deleted keeps it in its
-  `Channels` setting, and is back in it if a channel of that name is created again.
+- Joining a channel that doesn't exist says so instead of creating it, so that a typo can't make a second channel. For the same reason, `/pnc` to a channel that doesn't exist doesn't send anything.
+- To take another character out of a channel, run the command on it: `/pc Bob /posse channel leave healers`.
+- A channel with members online can't be deleted. A member who's offline when it's deleted keeps it in its `Channels` setting, and is back in it if a channel of that name is created again.
 
 ## The Posse TLO
 
@@ -182,12 +155,9 @@ The main members are here. [docs/tlo.md](docs/tlo.md) has every member that exis
 | `${Posse.LastCommand.TimedOut}`           | int     | Targets not heard from after 5 seconds: stalled, on a long load screen, or gone            |
 | `${Posse.LastCommand.Lost}`               | int     | Commands targets have reported losing since you sent this one                              |
 
-`Done` means the target's client ran the command, not that it worked in game: `/cast` can still
-fizzle. A target on a long load screen moves from `TimedOut` to `Dropped` when it arrives. `Lost` counts
-earlier commands, as the last one is never overwritten, and they may have been addressed to other clients.
+`Done` means the target's client ran the command, not that it worked in game: `/cast` can still fizzle. A target on a long load screen moves from `TimedOut` to `Dropped` when it arrives. `Lost` counts earlier commands, as the last one is never overwritten, and they may have been addressed to other clients.
 
-A member has `${Me}`'s members, under the same names, so `${Posse[Bob].PctHPs}` is Bob's
-`${Me.PctHPs}`. It also has these, which `${Me}` doesn't:
+A member has `${Me}`'s members, under the same names, so `${Posse[Bob].PctHPs}` is Bob's `${Me.PctHPs}`. It also has these, which `${Me}` doesn't:
 
 | Member       | Type   | Meaning                                              |
 | ------------ | ------ | ---------------------------------------------------- |
@@ -201,37 +171,24 @@ A member's `.Channels` is the channels it's in, separated by spaces.
 
 `.Spawn` is MacroQuest's real spawn if that character is in your zone, otherwise NULL.
 
-A client that closes or crashes disappears from the posse straight away, without waiting for a
-timeout. So does one that goes to character select, since it has no character then, and it joins again
-on entering the game. A client whose game has stalled stays listed with `.Stale` true.
+A client that closes or crashes disappears from the posse straight away, without waiting for a timeout. So does one that goes to character select, since it has no character then, and it joins again on entering the game. A client whose game has stalled stays listed with `.Stale` true.
 
 ### Reading `Me` members
 
-A member isn't MacroQuest's `character` type, which can only read the local character. You can read
-values through it, but can't call methods such as `Me.Stand`. Use `/pc Bob /stand` instead.
+A member isn't MacroQuest's `character` type, which can only read the local character. You can read values through it, but can't call methods such as `Me.Stand`. Use `/pc Bob /stand` instead.
 
 **These members are always ready**, and work on the first read:
 
 - **Identity:** `Name`, `ID`, `Level`, `Class`, `Race`
-- **Vitals:** `PctHPs`, `CurrentHPs`, `MaxHPs`, `PctMana`, `CurrentMana`, `MaxMana`, `PctEndurance`,
-  `CurrentEndurance`, `MaxEndurance`
+- **Vitals:** `PctHPs`, `CurrentHPs`, `MaxHPs`, `PctMana`, `CurrentMana`, `MaxMana`, `PctEndurance`, `CurrentEndurance`, `MaxEndurance`
 - **Condition:** `Combat`, `Casting`, `Sitting`, `Moving`, `Invis`, `Stunned`, `Feigning`, `Hovering`
 - **Place:** `X`, `Y`, `Z`, `Heading`
-- **Buffs:** `Buff[n or name]` and `Song[n or name]`, each with `ID` (the buff's slot, as in
-  MacroQuest), `Spell.ID`, `Name` and `Duration`, plus `CountBuffs` and `CountSongs`
+- **Buffs:** `Buff[n or name]` and `Song[n or name]`, each with `ID` (the buff's slot, as in MacroQuest), `Spell.ID`, `Name` and `Duration`, plus `CountBuffs` and `CountSongs`
 - **Pet:** `Pet.ID`, `Pet.Name`, `Pet.PctHPs`
 
-`Class`, `Race`, `Casting` and `Heading` show the same text as `${Me}`'s. `Casting` is NULL when not
-casting, and their own members, such as `Class.ShortName`, are read like any other member below.
-`Duration` is a number of milliseconds left, not MacroQuest's `timestamp`, so it has no members such
-as `TotalSeconds`, and it's NULL for a buff that doesn't wear off. `Spell` and `Casting` are
-MacroQuest's real `spell` values. Your own entry reads what you last published, like anyone else's.
+`Class`, `Race`, `Casting` and `Heading` show the same text as `${Me}`'s. `Casting` is NULL when not casting, and their own members, such as `Class.ShortName`, are read like any other member below. `Duration` is a number of milliseconds left, not MacroQuest's `timestamp`, so it has no members such as `TotalSeconds`, and it's NULL for a buff that doesn't wear off. `Spell` and `Casting` are MacroQuest's real `spell` values. Your own entry reads what you last published, like anyone else's.
 
-**Any other `Me` member works too, but not on the first read.** The first read returns NULL and asks
-the owning client to start evaluating that path. Its value arrives shortly after and is then kept up
-to date. Lua can read only the member names on a list built from MacroQuest's types, which covers
-MacroQuest's own members but not ones another plugin adds. To have a value ready before you need it,
-read it once first and ignore the result:
+**Any other `Me` member works too, but not on the first read.** The first read returns NULL and asks the owning client to start evaluating that path. Its value arrives shortly after and is then kept up to date. Lua can read only the member names on a list built from MacroQuest's types, which covers MacroQuest's own members but not ones another plugin adds. To have a value ready before you need it, read it once first and ignore the result:
 
 ```
 /varset ignored ${Posse[Bob].AltAbilityReady[Divine Arbitration]}
@@ -239,9 +196,7 @@ read it once first and ignore the result:
 /echo ${Posse[Bob].AltAbilityReady[Divine Arbitration]}
 ```
 
-A path nothing has read for 30 seconds stops being evaluated, but its last value is kept. The next
-read returns that value, which may be out of date, and starts evaluating the path again. Paths are
-relative to `Me` and can't contain `${`.
+A path nothing has read for 30 seconds stops being evaluated, but its last value is kept. The next read returns that value, which may be out of date, and starts evaluating the path again. Paths are relative to `Me` and can't contain `${`.
 
 ### In a macro
 
@@ -270,8 +225,7 @@ end
 mq.cmd('/pc Bob /sit')
 ```
 
-Members outside the always-ready list return text until their first value arrives, then a number or
-bool if that's what they are, so check for nil on those.
+Members outside the always-ready list return text until their first value arrives, then a number or bool if that's what they are, so check for nil on those.
 
 ## Settings
 
@@ -285,8 +239,7 @@ bool if that's what they are, so check for nil on those.
 | `Debug`            | `off`     | `on` says in chat what this client sends and receives. `/posse debug` sets this under `[Server_Character]`, creating the file if needed            |
 | `Channels`         | none      | The channels this character is in, separated by commas. `/posse channel join` and `leave` set this, only under `[Server_Character]`. In a posse without one of them, that one is ignored and stays saved |
 
-The channels themselves are the keys of a section of their own, `[Channels_<server>_<posse>]`. All clients
-need the same `config` folder to share what's saved there; running one MacroQuest for all of them does that.
+The channels themselves are the keys of a section of their own, `[Channels_<server>_<posse>]`. All clients need the same `config` folder to share what's saved there; running one MacroQuest for all of them does that.
 
 Errors always show in chat, whether or not `Debug` is on.
 
@@ -307,17 +260,9 @@ Errors always show in chat, whether or not `Debug` is on.
 
 ## How it works
 
-Clients share a block of named memory, one per server and posse name, with one slot per client. Each
-client writes only to its own slot, and publishes its status once per game pulse. A reader gets the
-latest published values straight from that slot whenever a macro asks, without any message passing.
-A sequence counter makes sure a reader never sees a half-written update.
+Clients share a block of named memory, one per server and posse name, with one slot per client. Each client writes only to its own slot, and publishes its status once per game pulse. A reader gets the latest published values straight from that slot whenever a macro asks, without any message passing. A sequence counter makes sure a reader never sees a half-written update.
 
-A command goes into a log in the sender's own slot, addressed to the slots it's for, and each target
-picks it up on its next pulse and runs it on the game thread, then answers in its own slot, where the
-sender reads it. Channels are in one table that all clients share, and each client lists the ones it's in
-as part of its status, so a client that goes away is out of them at once. `Me` paths that aren't in the
-always-ready list will go into the owning client's slot and be answered the same way, because only that
-client can evaluate them.
+A command goes into a log in the sender's own slot, addressed to the slots it's for, and each target picks it up on its next pulse and runs it on the game thread, then answers in its own slot, where the sender reads it. Channels are in one table that all clients share, and each client lists the ones it's in as part of its status, so a client that goes away is out of them at once. `Me` paths that aren't in the always-ready list will go into the owning client's slot and be answered the same way, because only that client can evaluate them.
 
 ## How fast it is
 
@@ -328,24 +273,17 @@ How old a member's status was when read, measured in game with two clients over 
 | Average | 16 ms                           | 48 ms                    |
 | Worst   | 34 ms                           | 100 ms                   |
 
-So status is never more than about one frame of the owning client behind, and the frame rate of the
-client reading it doesn't matter. Publishing cost 27 to 30 µs per pulse on average, and 563 µs at worst.
+So status is never more than about one frame of the owning client behind, and the frame rate of the client reading it doesn't matter. Publishing cost 27 to 30 µs per pulse on average, and 563 µs at worst.
 
-Commands took 2 to 103 ms to reach another client, over 7 samples in game with three clients. A command
-that goes to the server, such as `/say`, then takes as long as the server does.
+Commands took 2 to 103 ms to reach another client, over 7 samples in game with three clients. A command that goes to the server, such as `/say`, then takes as long as the server does.
 
-These are still design estimates, not measurements: getting a value from shared memory should take well under a microsecond
-on top of MacroQuest's usual cost of parsing a `${...}`, and each client's work per pulse should stay
-about the same however many clients are in the posse.
+These are still design estimates, not measurements: getting a value from shared memory should take well under a microsecond on top of MacroQuest's usual cost of parsing a `${...}`, and each client's work per pulse should stay about the same however many clients are in the posse.
 
-Posse only removes delay between your clients. A client's own data is still only as current as what
-the server has told it.
+Posse only removes delay between your clients. A client's own data is still only as current as what the server has told it.
 
 ## Security
 
-Anything running as your Windows user can read the shared memory, and could write commands into it.
-Posse doesn't defend against programs on your own PC, so don't run clients alongside software you
-don't trust. Set `AllowCommands=false`, or use `/posse allowcommands false`, on any character that shouldn't accept commands.
+Anything running as your Windows user can read the shared memory, and could write commands into it. Posse doesn't defend against programs on your own PC, so don't run clients alongside software you don't trust. Set `AllowCommands=false`, or use `/posse allowcommands false`, on any character that shouldn't accept commands.
 
 ## License
 

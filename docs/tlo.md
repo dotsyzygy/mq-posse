@@ -1,16 +1,13 @@
 # The Posse TLO
 
-Every member the `Posse` TLO has today, for macros and Lua. The [README](../README.md) has the commands
-these go with, and [status.md](status.md) has what's still being built.
+Every member the `Posse` TLO has today, for macros and Lua. The [README](../README.md) has the commands these go with, and [status.md](status.md) has what's still being built.
 
 ## Reading these tables
 
-- **Types** are what MacroQuest sees. `int` is `int64` for a number too big for it. `spell` and `spawn` are
-  MacroQuest's own types, with all their usual members. The `posse_*` types are described below.
+- **Types** are what MacroQuest sees. `int` is `int64` for a number too big for it. `spell` and `spawn` are MacroQuest's own types, with all their usual members. The `posse_*` types are described below.
 - **NULL** is what a read gives when the thing it asks for isn't there, and `nil` in Lua.
 - **Character and channel names** match in any case, so `${Posse[bob]}` is `${Posse[Bob]}`.
-- **How fresh:** a client publishes its status each pulse, so values are as old as `.Age` says. The list of
-  who's online is rebuilt every 100 ms, so a member who has just joined can take that long to appear.
+- **How fresh:** a client publishes its status each pulse, so values are as old as `.Age` says. The list of who's online is rebuilt every 100 ms, so a member who has just joined can take that long to appear.
 
 ## `Posse`
 
@@ -34,11 +31,9 @@ Shows as the posse's name.
 
 ## `posse_member`
 
-Shows as the member's name. Members named after one of `${Me}`'s read the same as that character's
-`${Me}`, except as noted. Your own entry reads what you last published, like anyone else's.
+Shows as the member's name. Members named after one of `${Me}`'s read the same as that character's `${Me}`, except as noted. Your own entry reads what you last published, like anyone else's.
 
-Every member here is NULL once that character is no longer online. While it's on a load screen, these keep
-their last values, and `.GameState` says so.
+Every member here is NULL once that character is no longer online. While it's on a load screen, these keep their last values, and `.GameState` says so.
 
 Who and where:
 
@@ -135,11 +130,9 @@ Shows as the channel's name, as it was created.
 
 ## `posse_last_command`
 
-The last command you sent with `/pc` or any of the others. Shows as that command. It starts
-empty each time this client joins a posse.
+The last command you sent with `/pc` or any of the others. Shows as that command. It starts empty each time this client joins a posse.
 
-Each target is counted in exactly one of `.Pending`, `.Done`, `.Refused`, `.Dropped` and `.TimedOut`, so they
-add up to `.Targets`. A macro waits for an answer like this:
+Each target is counted in exactly one of `.Pending`, `.Done`, `.Refused`, `.Dropped` and `.TimedOut`, so they add up to `.Targets`. A macro waits for an answer like this:
 
 ```
 /pc Bob /sit
@@ -159,7 +152,6 @@ add up to `.Targets`. A macro waits for an answer like this:
 
 ## Not built yet
 
-These are in the [README](../README.md) as the plan, but read as NULL today. Their state is in
-[status.md](status.md).
+These are in the [README](../README.md) as the plan, but read as NULL today. Their state is in [status.md](status.md).
 
 - Any other `${Me}` member on a member, such as `${Posse[Bob].AltAbilityReady[...]}`, from phase 3.
