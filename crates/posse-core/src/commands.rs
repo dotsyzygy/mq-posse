@@ -534,8 +534,11 @@ impl LastCommand {
         &self.text
     }
 
+    /// Every target that lost commands lost the oldest ones in the same log, so
+    /// the commands lost are those of the target that lost the most, and not the
+    /// sum of what each reports.
     pub fn add_lost(&mut self, count: u32) {
-        self.lost = self.lost.saturating_add(count);
+        self.lost = self.lost.max(count);
     }
 
     /// `me` is the slot it was sent from.
@@ -1157,6 +1160,29 @@ mod tests {
                 ..Tally::default()
             }
         );
+    }
+
+    #[test]
+    fn commands_lost_by_two_targets_are_counted_once() {
+        let mut memory = zeroed_memory();
+        let region = region(&mut memory);
+        let (sender, bob, cal) = (claim(region, 1), claim(region, 2), claim(region, 3));
+        let mut inboxes = [Inbox::new(region, bob), Inbox::new(region, cal)];
+        let mut complaints = Complaints::new(region, sender);
+        for _ in 0..LOG_LEN + 3 {
+            region.send(sender, targets(&[bob, cal]), 100, "/sit").unwrap();
+        }
+        let mut last = tracked(region, sender, &[bob, cal]);
+        for inbox in &mut inboxes {
+            inbox.receive(region, 100);
+        }
+
+        let found = complaints.check(region);
+        assert_eq!(found.iter().map(|complaint| complaint.lost).collect::<Vec<_>>(), [4, 4]);
+        for complaint in found {
+            last.add_lost(complaint.lost);
+        }
+        assert_eq!(last.tally(region, sender, 100).lost, 4);
     }
 
     #[test]
