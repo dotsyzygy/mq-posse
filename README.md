@@ -24,7 +24,9 @@ Unlike `${Spawn[Bob]}` or `${Group}`, this data comes from Bob's own client, so 
 
 ## Install
 
-You need Rust with the `i686-pc-windows-msvc` target, `MQ_ROOT` pointing at your MacroQuest checkout, and `cargo-mq`:
+Download `MQ2Posse.dll` from the [latest release](https://github.com/dotsyzygy/mq-posse/releases/latest) and copy it into MacroQuest's `plugins` folder. Each release says which MacroQuest version, branch and commit it was built against; use it with a MacroQuest built from that commit.
+
+To build it yourself instead, you need Rust with the `i686-pc-windows-msvc` target, `MQ_ROOT` pointing at your MacroQuest checkout, and `cargo-mq`:
 
 ```
 cargo install --git https://github.com/dotsyzygy/mq-emu-rs cargo-mq
