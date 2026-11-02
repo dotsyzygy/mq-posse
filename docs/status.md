@@ -62,7 +62,7 @@ Built on mq-emu's `DataTypeDef::any_member`.
 - [x] Paths unread for 30 seconds stop being evaluated but keep their last value, and the next read returns that value and starts evaluating again
 - [x] A way for a macro to see how old a path's value is, since `.Age` only covers the member's status: `.PathAge[path]`
 - [x] The same on `.Pet` and `.Buff`/`.Song` values, for their members MQ2Posse doesn't publish
-- [ ] All of the above checked in game on two clients, including Lua reading typed values and a method being refused
+- [x] All of the above checked in game on two clients, including Lua reading typed values and a method being refused
 
 ### 4. Hardening
 
