@@ -9,12 +9,14 @@ use std::fmt;
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicU32, Ordering, fence};
 
-use crate::commands::CommandLog;
+use crate::channels::ChannelTable;
+use crate::commands::{CommandLog, Reply};
 use crate::status::{STATUS_WORDS, Status};
 
 /// Clients with a different layout refuse to share a block. Change this with
-/// any change to [`Region`], [`Status`] or the command log.
-pub const LAYOUT_VERSION: u32 = 0x5053_0002;
+/// any change to [`Region`], [`Status`], the channel table, the command log or
+/// the replies.
+pub const LAYOUT_VERSION: u32 = 0x5053_0003;
 pub const MAX_CLIENTS: usize = 64;
 pub const REGION_SIZE: usize = size_of::<Region>();
 
@@ -74,11 +76,16 @@ struct Slot {
     sequence: AtomicU32,
     status: [AtomicU32; STATUS_WORDS],
     commands: CommandLog,
+    /// What this client did with what each slot sent it. Like the log, these are
+    /// never reset: the sender matches an answer to a sequence number, and counts
+    /// how far its totals have moved.
+    replies: [Reply; MAX_CLIENTS],
 }
 
 #[repr(C)]
 pub struct Region {
     version: AtomicU32,
+    pub(crate) channels: ChannelTable,
     slots: [Slot; MAX_CLIENTS],
 }
 
@@ -176,6 +183,11 @@ impl Region {
 
     pub(crate) fn log(&self, id: SlotId) -> &CommandLog {
         &self.slots[id.0].commands
+    }
+
+    /// What the client in `id` has reported to the client in `to`.
+    pub(crate) fn reply(&self, id: SlotId, to: SlotId) -> &Reply {
+        &self.slots[id.0].replies[to.0]
     }
 
     /// Slots that have an owner, with their owners.

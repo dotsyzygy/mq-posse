@@ -7,18 +7,19 @@ use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use posse_core::{Audience, AttachError, Delivery, Inbox, LAYOUT_VERSION, Liveness, Owner, REGION_SIZE, Roster, Status};
+use posse_core::{Answer, Audience, AttachError, Delivery, Inbox, LAYOUT_VERSION, LastCommand, Liveness, Owner, REGION_SIZE, Roster, Status};
 use posse_shm::{Mapping, OpenError, Processes, now_ms, this_process};
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Memory::{CreateFileMappingW, FILE_MAP_ALL_ACCESS, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READWRITE, UnmapViewOfFile};
 
 const CHILD_MAPPING: &str = "POSSE_TEST_MAPPING";
 const CHILD_NAME: &str = "POSSE_TEST_NAME";
+const CHILD_CHANNEL: &str = "POSSE_TEST_CHANNEL";
 const WAIT: Duration = Duration::from_secs(10);
 
 /// Not a test: the other client, when run by `spawn_client`. It joins and
 /// publishes until it's killed, as a game client does. It "runs" a command by
-/// publishing it as its zone, so the test can see that it did.
+/// publishing it as its zone and answering, so the test can see that it did.
 #[test]
 fn other_client() {
     let (Ok(mapping), Ok(name)) = (env::var(CHILD_MAPPING), env::var(CHILD_NAME)) else { return };
@@ -27,11 +28,15 @@ fn other_client() {
     let slot = mapping.region().claim(me, &mut Processes::default()).unwrap();
     let mut status = Status::default();
     status.set_name(&name);
+    if let Ok(channel) = env::var(CHILD_CHANNEL) {
+        status.join_channel(&channel).unwrap();
+    }
     let mut inbox = Inbox::new(mapping.region(), slot);
     loop {
         for delivery in inbox.receive(mapping.region(), now_ms()) {
-            if let Delivery::Run { text, .. } = delivery {
+            if let Delivery::Run { from, sequence, text, .. } = delivery {
                 status.set_zone(&text);
+                mapping.region().answer(slot, from, sequence, Answer::Ran);
             }
         }
         status.set_published_ms(now_ms());
@@ -51,15 +56,17 @@ impl Drop for Client {
 }
 
 fn spawn_client(mapping: &str, name: &str) -> Client {
-    let child = Command::new(env::current_exe().unwrap())
-        .args(["--exact", "other_client", "--nocapture"])
-        .env(CHILD_MAPPING, mapping)
-        .env(CHILD_NAME, name)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .spawn()
-        .unwrap();
-    Client(child)
+    Client(client_command(mapping, name).spawn().unwrap())
+}
+
+fn spawn_client_in_channel(mapping: &str, name: &str, channel: &str) -> Client {
+    Client(client_command(mapping, name).env(CHILD_CHANNEL, channel).spawn().unwrap())
+}
+
+fn client_command(mapping: &str, name: &str) -> Command {
+    let mut command = Command::new(env::current_exe().unwrap());
+    command.args(["--exact", "other_client", "--nocapture"]).env(CHILD_MAPPING, mapping).env(CHILD_NAME, name).stdin(Stdio::null()).stdout(Stdio::null());
+    command
 }
 
 /// A mapping name no other test run uses.
@@ -133,6 +140,78 @@ fn a_command_reaches_only_the_client_addressed_across_processes() {
     let published = roster.read(region, "Cleric").unwrap().published_ms();
     wait_for("Cleric to read its log after the send", || roster.read(region, "Cleric").is_some_and(|status| status.published_ms() > published));
     assert_eq!(roster.read(region, "Cleric").unwrap().zone(), "", "the command wasn't for Cleric");
+}
+
+#[test]
+fn a_command_to_a_channel_reaches_only_its_members_and_they_answer_across_processes() {
+    let name = unique("channel");
+    let mapping = Mapping::open(&name).unwrap();
+    let region = mapping.region();
+    let me = this_process().unwrap();
+    let mut processes = Processes::default();
+    let slot = region.claim(me, &mut processes).unwrap();
+    let _bob = spawn_client_in_channel(&name, "Bob", "healers");
+    let _cleric = spawn_client_in_channel(&name, "Cleric", "healers");
+    let _dave = spawn_client(&name, "Dave");
+
+    let mut roster = Roster::default();
+    wait_for("all three clients", || {
+        roster.refresh(region, &mut processes);
+        roster.members().len() == 3
+    });
+    assert_eq!(roster.in_channel(region, "HEALERS").len(), 2);
+
+    let targets = roster.targets(region, me, &Audience::Channel("healers".to_owned()));
+    let sent_ms = now_ms();
+    let sequence = region.send(slot, targets, sent_ms, "/sit").unwrap();
+    let last = LastCommand::new("/sit", sequence, targets, sent_ms, None);
+    assert_eq!(last.tally(region, slot, sent_ms).targets, 2);
+
+    wait_for("both members to answer", || last.tally(region, slot, sent_ms).done == 2);
+    assert_eq!(last.tally(region, slot, sent_ms).pending, 0);
+    let published = roster.read(region, "Dave").unwrap().published_ms();
+    wait_for("Dave to read its log after the send", || roster.read(region, "Dave").is_some_and(|status| status.published_ms() > published));
+    assert_eq!(roster.read(region, "Dave").unwrap().zone(), "", "the command wasn't for Dave");
+}
+
+#[test]
+fn a_client_killed_before_it_answers_times_out_and_leaves_its_channel() {
+    let name = unique("killed-target");
+    let mapping = Mapping::open(&name).unwrap();
+    let region = mapping.region();
+    let me = this_process().unwrap();
+    let mut processes = Processes::default();
+    let slot = region.claim(me, &mut processes).unwrap();
+    let mut bob = spawn_client_in_channel(&name, "Bob", "healers");
+
+    let mut roster = Roster::default();
+    wait_for("Bob", || {
+        roster.refresh(region, &mut processes);
+        roster.find("Bob").is_some()
+    });
+    let targets = roster.targets(region, me, &Audience::Channel("healers".to_owned()));
+    bob.0.kill().unwrap();
+    bob.0.wait().unwrap();
+
+    let sent_ms = now_ms();
+    let sequence = region.send(slot, targets, sent_ms, "/sit").unwrap();
+    let last = LastCommand::new("/sit", sequence, targets, sent_ms, None);
+    assert_eq!(last.tally(region, slot, sent_ms).pending, 1);
+    assert_eq!(last.tally(region, slot, sent_ms + posse_core::COMMAND_TIMEOUT_MS + 1).timed_out, 1);
+
+    roster.refresh(region, &mut processes);
+    assert!(roster.in_channel(region, "healers").is_empty());
+}
+
+#[test]
+fn a_channel_created_in_one_process_is_seen_in_another() {
+    let name = unique("channel-table");
+    let first = Mapping::open(&name).unwrap();
+    first.region().create_channel("Healers").unwrap();
+    let second = Mapping::open(&name).unwrap();
+    assert_eq!(second.region().channel("healers").as_deref(), Some("Healers"));
+    assert!(second.region().delete_channel("healers"));
+    assert_eq!(first.region().channel("healers"), None);
 }
 
 #[test]

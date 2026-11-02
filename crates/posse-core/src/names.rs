@@ -3,6 +3,7 @@
 use std::fmt;
 
 const MAX_POSSE_NAME: usize = 32;
+pub const MAX_CHANNEL_NAME: usize = 31;
 
 const COMPASS: [&str; 16] = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
 
@@ -19,6 +20,17 @@ impl fmt::Display for InvalidPosseName {
 pub fn validate_posse_name(name: &str) -> Result<(), InvalidPosseName> {
     let valid = (1..=MAX_POSSE_NAME).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     if valid { Ok(()) } else { Err(InvalidPosseName) }
+}
+
+/// A channel name that can't be used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidChannelName;
+
+/// The same characters as a posse's name, so that a name is one word in a
+/// command and can be listed in a setting.
+pub fn validate_channel_name(name: &str) -> Result<(), InvalidChannelName> {
+    let valid = (1..=MAX_CHANNEL_NAME).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if valid { Ok(()) } else { Err(InvalidChannelName) }
 }
 
 /// The name of a posse's shared memory. Windows matches these names by case,
@@ -45,6 +57,16 @@ mod tests {
         }
         for bad in ["", "two words", "a\\b", "a/b", "é", &"x".repeat(MAX_POSSE_NAME + 1)] {
             assert_eq!(validate_posse_name(bad), Err(InvalidPosseName), "{bad}");
+        }
+    }
+
+    #[test]
+    fn channel_names() {
+        for good in ["healers", "Tanks-1", "a_b", &"x".repeat(MAX_CHANNEL_NAME)] {
+            assert_eq!(validate_channel_name(good), Ok(()), "{good}");
+        }
+        for bad in ["", "two words", "a,b", "a=b", "é", &"x".repeat(MAX_CHANNEL_NAME + 1)] {
+            assert_eq!(validate_channel_name(bad), Err(InvalidChannelName), "{bad}");
         }
     }
 

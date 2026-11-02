@@ -1,4 +1,5 @@
-//! The `Posse` TLO and its datatypes.
+//! The `Posse` TLO and its datatypes. `docs/tlo.md` documents every member, and
+//! a test in `posse-core` fails if the two list different ones.
 
 use mq_emu::{DataType, DataTypeDef, DataTypeError, Mq, SpawnId, SpellId, TloError, Value};
 use posse_core::{BuffEntry, State, Status, compass, flags};
@@ -13,6 +14,8 @@ pub struct Types {
     member: DataType<String>,
     pet: DataType<String>,
     buff: DataType<String>,
+    channel: DataType<String>,
+    last_command: DataType<()>,
     posse: DataType<()>,
 }
 
@@ -84,8 +87,9 @@ fn add_member_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
         .member("Stale", |plugin, _, name, _| Some(plugin.status_of(name)?.is_stale(now_ms()).into()))
         .member("Spawn", |plugin, mq, name, _| {
             let status = plugin.status_of(name)?;
-            let here = mq.zone()?.short_name();
-            (status.state() == State::InGame && status.zone().eq_ignore_ascii_case(&here)).then(|| Value::spawn(SpawnId(status.id)))
+            let here = mq.zone()?;
+            let same_zone = status.zone().eq_ignore_ascii_case(&here.short_name()) && status.zone_instance == u32::from(here.instance());
+            (status.state() == State::InGame && same_zone).then(|| Value::spawn(SpawnId(status.id)))
         })
         .member("Class", |plugin, mq, name, _| Some(mq.class_name(plugin.status_of(name)?.class as u8)?.into()))
         .member("Race", |plugin, mq, name, _| Some(mq.race_name(plugin.status_of(name)?.race)?.into()))
@@ -106,6 +110,7 @@ fn add_member_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
         })
         .text(|_, _, name| name.clone());
     def = field(def, "Name", |status| Some(status.name().into()));
+    def = field(def, "Channels", |status| Some(status.channels().join(" ").into()));
     def = field(def, "ID", |status| Some(status.id.into()));
     def = field(def, "Level", |status| Some(status.level.into()));
     def = field(def, "PctHPs", |status| Some(status.hp_percent.into()));
@@ -158,6 +163,28 @@ fn add_buff_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
     mq.add_type("posse_buff", def)
 }
 
+/// A channel, by the name it was created with.
+fn add_channel_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
+    let def = DataTypeDef::new()
+        .member("Count", |plugin: &mut Posse, _, name: &String, _| Some((plugin.channel_members(name)?.len() as u32).into()))
+        .member("Members", |plugin, _, name, _| Some(plugin.channel_members(name)?.join(" ").into()))
+        .text(|_, _, name| name.clone());
+    mq.add_type("posse_channel", def)
+}
+
+fn add_last_command_type(mq: &Mq<Posse>) -> Result<DataType<()>, DataTypeError> {
+    let def = DataTypeDef::new()
+        .member("Targets", |plugin: &mut Posse, _, _: &(), _| Some(plugin.last_command_tally()?.targets.into()))
+        .member("Pending", |plugin, _, _, _| Some(plugin.last_command_tally()?.pending.into()))
+        .member("Done", |plugin, _, _, _| Some(plugin.last_command_tally()?.done.into()))
+        .member("Refused", |plugin, _, _, _| Some(plugin.last_command_tally()?.refused.into()))
+        .member("Dropped", |plugin, _, _, _| Some(plugin.last_command_tally()?.dropped.into()))
+        .member("TimedOut", |plugin, _, _, _| Some(plugin.last_command_tally()?.timed_out.into()))
+        .member("Lost", |plugin, _, _, _| Some(plugin.last_command_tally()?.lost.into()))
+        .text(|plugin, _, _| plugin.connection.as_ref().and_then(|connection| connection.last_command.as_ref()).map_or(String::new(), |last| last.text().to_owned()));
+    mq.add_type("posse_last_command", def)
+}
+
 fn add_posse_type(mq: &Mq<Posse>) -> Result<DataType<()>, DataTypeError> {
     let def = DataTypeDef::new()
         .member("Count", |plugin: &mut Posse, _, _: &(), _| Some((plugin.connection.as_ref()?.roster.members().len() as u32).into()))
@@ -166,6 +193,15 @@ fn add_posse_type(mq: &Mq<Posse>) -> Result<DataType<()>, DataTypeError> {
             Some(names.join(" ").into())
         })
         .member("Member", |plugin, _, _, index| plugin.member_value(index))
+        .member("Channels", |plugin, _, _, _| Some(plugin.connection.as_ref()?.mapping.region().channel_names().join(" ").into()))
+        .member("Channel", |plugin, _, _, index| {
+            let name = plugin.connection.as_ref()?.mapping.region().channel(index)?;
+            Some(plugin.types.as_ref()?.channel.value(name))
+        })
+        .member("LastCommand", |plugin, _, _, _| {
+            plugin.connection.as_ref()?;
+            Some(plugin.types.as_ref()?.last_command.value(()))
+        })
         .text(|plugin, _, _| plugin.connection.as_ref().map_or(String::new(), |connection| connection.name.clone()));
     mq.add_type("posse", def)
 }
@@ -177,6 +213,8 @@ pub fn add(mq: &Mq<Posse>) -> Result<Types, String> {
         member: add_member_type(mq).map_err(describe)?,
         pet: add_pet_type(mq).map_err(describe)?,
         buff: add_buff_type(mq).map_err(describe)?,
+        channel: add_channel_type(mq).map_err(describe)?,
+        last_command: add_last_command_type(mq).map_err(describe)?,
         posse: add_posse_type(mq).map_err(describe)?,
     };
     mq.add_tlo("Posse", |plugin: &mut Posse, _, index| {

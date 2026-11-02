@@ -57,6 +57,11 @@ impl Roster {
         status.name().eq_ignore_ascii_case(name).then_some(status)
     }
 
+    /// The members in a channel, by name.
+    pub fn in_channel(&self, region: &Region, channel: &str) -> Vec<&Member> {
+        self.members.iter().filter(|member| region.read(member.slot).unwrap_or(member.status).in_channel(channel)).collect()
+    }
+
     /// The members in an audience, other than `me`.
     pub fn targets(&self, region: &Region, me: Owner, audience: &Audience) -> Targets {
         let mut targets = Targets::default();
@@ -100,6 +105,65 @@ mod tests {
 
         let alone = roster.targets(region, owner(1), &Audience::Names(vec!["Alice".to_owned()]));
         assert!(alone.is_empty());
+    }
+
+    #[test]
+    fn a_channel_holds_the_members_who_list_it_and_the_sender_is_never_a_target() {
+        let mut memory = zeroed_memory();
+        let region = region(&mut memory);
+        let (alice, bob) = (join(region, 1, "Alice"), join(region, 2, "Bob"));
+        let carol = join(region, 3, "Carol");
+        for (slot, name) in [(alice, "Alice"), (bob, "Bob")] {
+            let mut status = region.read(slot).unwrap();
+            assert_eq!(status.name(), name);
+            status.join_channel("Healers").unwrap();
+            region.publish(slot, &status);
+        }
+        let mut roster = Roster::default();
+        roster.refresh(region, &mut Dead::default());
+
+        let names: Vec<&str> = roster.in_channel(region, "healers").iter().map(|member| member.name.as_str()).collect();
+        assert_eq!(names, ["Alice", "Bob"]);
+        assert!(roster.in_channel(region, "tanks").is_empty());
+
+        let targets = roster.targets(region, owner(1), &Audience::Channel("healers".to_owned()));
+        assert!(!targets.contains(alice) && targets.contains(bob) && !targets.contains(carol));
+    }
+
+    #[test]
+    fn a_member_who_left_a_channel_is_out_of_it_before_the_next_refresh() {
+        let mut memory = zeroed_memory();
+        let region = region(&mut memory);
+        let bob = join(region, 2, "Bob");
+        let mut status = region.read(bob).unwrap();
+        status.join_channel("healers").unwrap();
+        region.publish(bob, &status);
+        let mut roster = Roster::default();
+        roster.refresh(region, &mut Dead::default());
+        assert_eq!(roster.in_channel(region, "healers").len(), 1);
+
+        status.leave_channel("healers");
+        region.publish(bob, &status);
+        assert!(roster.in_channel(region, "healers").is_empty());
+    }
+
+    #[test]
+    fn a_dead_member_is_out_of_its_channels_and_the_next_owner_of_its_slot_starts_in_none() {
+        let mut memory = zeroed_memory();
+        let region = region(&mut memory);
+        let bob = join(region, 2, "Bob");
+        let mut status = region.read(bob).unwrap();
+        status.join_channel("healers").unwrap();
+        region.publish(bob, &status);
+
+        let mut dead = Dead::default();
+        dead.0.insert(owner(2));
+        let mut roster = Roster::default();
+        roster.refresh(region, &mut dead);
+        assert!(roster.in_channel(region, "healers").is_empty());
+
+        assert_eq!(region.claim(owner(3), &mut dead).unwrap(), bob);
+        assert_eq!(region.read(bob), None, "nothing of Bob's is left to read");
     }
 
     #[test]

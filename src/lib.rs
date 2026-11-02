@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use mq_emu::{GameState, Ini, IniError, Mq, Plugin, Value};
-use posse_core::{ALIASES, Alias, Audience, Delivery, Inbox, Owner, Roster, SUBCOMMANDS, Scope, SlotId, State, Status, mapping_name, validate_posse_name};
+use posse_core::{ALIASES, Alias, Answer, Audience, Complaints, Delivery, Inbox, LastCommand, Owner, Roster, SUBCOMMANDS, Scope, SlotId, State, Status, Tally, COMMAND_TIMEOUT_MS, mapping_name, validate_channel_name, validate_posse_name};
 
 use posse_shm::{Mapping, Processes, now_ms, this_process};
 use tlo::Types;
@@ -15,8 +15,11 @@ use tlo::Types;
 const COMMAND: &str = "/posse";
 const DEFAULT_POSSE: &str = "default";
 const DEFAULT_SECTION: &str = "Default";
-const USAGE: &str = "usage: /posse [help | list | join <name> | leave | debug on|off | stats [reset]]";
+const USAGE: &str = "usage: /posse [help | list | join <name> | leave | channel [list | create|delete|join|leave <name>] | allowcommands true|false | debug on|off | stats [reset]]";
+const CHANNEL_USAGE: &str = "usage: /posse channel [list | create <name> | delete <name> | join <name> | leave <name>]";
 const SETTINGS_FILE: &str = "MQ2Posse.ini";
+/// The key in a character's section listing the channels it's in.
+const CHANNELS_KEY: &str = "Channels";
 /// How often to check who's alive. Each check asks Windows about every member,
 /// so not every pulse.
 const ROSTER_REFRESH: Duration = Duration::from_millis(100);
@@ -29,6 +32,8 @@ struct Connection {
     me: Owner,
     roster: Roster,
     inbox: Inbox,
+    complaints: Complaints,
+    last_command: Option<LastCommand>,
     processes: Processes,
     refreshed: Instant,
 }
@@ -147,6 +152,18 @@ impl Posse {
         connection.roster.read(connection.mapping.region(), name)
     }
 
+    /// What's become of the last command sent, or all zeros if none has been.
+    fn last_command_tally(&self) -> Option<Tally> {
+        let connection = self.connection.as_ref()?;
+        Some(connection.last_command.as_ref().map_or_else(Tally::default, |last| last.tally(connection.mapping.region(), connection.slot, now_ms())))
+    }
+
+    /// The names of the online members of a channel, separated by spaces.
+    fn channel_members(&self, channel: &str) -> Option<Vec<String>> {
+        let connection = self.connection.as_ref()?;
+        Some(connection.roster.in_channel(connection.mapping.region(), channel).iter().map(|member| member.name.clone()).collect())
+    }
+
     /// `${Posse.Member[name]}`, under the name it's published with.
     fn member_value(&self, name: &str) -> Option<Value> {
         let member = self.connection.as_ref()?.roster.find(name)?;
@@ -192,8 +209,9 @@ impl Posse {
         let section = settings_section(mq, &character);
         let ini = settings_file(mq).inspect_err(|e| mq.chat(format!("[Posse] couldn't open {SETTINGS_FILE}, so using default settings: {e}"))).ok();
         let read = |key: &str| ini.as_ref().and_then(|ini| ini.get(&section, key).or_else(|| ini.get(DEFAULT_SECTION, key)));
-        self.allow_commands = read("AllowCommands").is_none_or(|value| value != "0");
-        self.debug = ini.as_ref().and_then(|ini| ini.get_bool(&section, "Debug").or_else(|| ini.get_bool(DEFAULT_SECTION, "Debug"))).unwrap_or(false);
+        let switch = |key: &str| ini.as_ref().and_then(|ini| ini.get_bool(&section, key).or_else(|| ini.get_bool(DEFAULT_SECTION, key)));
+        self.allow_commands = switch("AllowCommands").unwrap_or(true);
+        self.debug = switch("Debug").unwrap_or(false);
         if self.left {
             return;
         }
@@ -210,6 +228,7 @@ impl Posse {
     fn join(&mut self, mq: &Mq<Self>, posse: &str) -> bool {
         match self.connect(mq, posse) {
             Ok(()) => {
+                self.load_channels(mq);
                 self.publish(mq);
                 if let Some(connection) = &mut self.connection {
                     connection.refresh();
@@ -230,12 +249,149 @@ impl Posse {
         }
         self.leave();
         let me = this_process().ok_or("Windows wouldn't say when this process started")?;
-        let mapping = Mapping::open(&mapping_name(&mq.parse("${EverQuest.Server}"), posse)).map_err(|e| e.to_string())?;
+        let mapping = Mapping::open(&mapping_name(&server(mq), posse)).map_err(|e| e.to_string())?;
         let mut processes = Processes::default();
         let slot = mapping.region().claim(me, &mut processes).map_err(|_| "the posse is full")?;
         let inbox = Inbox::new(mapping.region(), slot);
-        self.connection = Some(Connection { name: posse.to_owned(), mapping, slot, me, roster: Roster::default(), inbox, processes, refreshed: Instant::now() });
+        let complaints = Complaints::new(mapping.region(), slot);
+        self.connection = Some(Connection { name: posse.to_owned(), mapping, slot, me, roster: Roster::default(), inbox, complaints, last_command: None, processes, refreshed: Instant::now() });
         Ok(())
+    }
+
+    /// Puts this posse's saved channels in the shared table, as nothing else
+    /// does once every client has left, and this character back in its own.
+    /// One deleted while it was away is forgotten.
+    fn load_channels(&mut self, mq: &Mq<Self>) {
+        self.status.set_channels(&[]);
+        let Some(connection) = &self.connection else { return };
+        let ini = match settings_file(mq) {
+            Ok(ini) => ini,
+            Err(e) => {
+                mq.chat(format!("[Posse] couldn't open {SETTINGS_FILE}, so no channels were restored: {e}"));
+                return;
+            }
+        };
+        let region = connection.mapping.region();
+        for name in ini.keys(&channels_section(mq, &connection.name)) {
+            if let Err(e) = region.create_channel(&name) {
+                mq.chat(format!("[Posse] couldn't restore channel {name}: {e}"));
+            }
+        }
+        if self.settings_for.is_empty() {
+            return;
+        }
+        // Saved channels this posse doesn't have stay saved, as they may be
+        // another posse's, or come back if the channel is created again.
+        let saved = saved_channels(&ini, &settings_section(mq, &self.settings_for));
+        let kept: Vec<String> = saved.iter().filter_map(|name| validate_channel_name(name).ok().and_then(|()| region.channel(name))).collect();
+        self.status.set_channels(&kept);
+    }
+
+    /// Adds a channel to the ones saved for this character, or removes one,
+    /// leaving the rest as they are. It stays changed for now if that can't be
+    /// saved.
+    fn save_channel(&self, mq: &Mq<Self>, channel: &str, joined: bool) {
+        if self.settings_for.is_empty() {
+            mq.chat("[Posse] couldn't save that: no character to save it for yet");
+            return;
+        }
+        let section = settings_section(mq, &self.settings_for);
+        let saved = settings_file(mq).and_then(|ini| {
+            let mut channels = saved_channels(&ini, &section);
+            channels.retain(|name| !name.eq_ignore_ascii_case(channel));
+            if joined {
+                channels.push(channel.to_owned());
+            }
+            if channels.is_empty() { ini.remove(&section, CHANNELS_KEY) } else { ini.set(&section, CHANNELS_KEY, channels.join(",")) }
+        });
+        if let Err(e) = saved {
+            mq.chat(format!("[Posse] couldn't save that to {SETTINGS_FILE}: {e}"));
+        }
+    }
+
+    fn channel_command(&mut self, mq: &Mq<Self>, args: &str) {
+        let (action, name) = split_word(args);
+        let action = action.to_ascii_lowercase();
+        let Some(connection) = &mut self.connection else {
+            mq.chat("[Posse] not in a posse");
+            return;
+        };
+        connection.refresh();
+        if action.is_empty() || action == "list" {
+            self.list_channels(mq);
+            return;
+        }
+        if name.is_empty() || !matches!(action.as_str(), "create" | "delete" | "join" | "leave") {
+            mq.chat(format!("[Posse] {CHANNEL_USAGE}"));
+            return;
+        }
+        let region = connection.mapping.region();
+        let section = channels_section(mq, &connection.name);
+        match action.as_str() {
+            "create" => match region.create_channel(name) {
+                Ok(created) => {
+                    if let Err(e) = settings_file(mq).and_then(|ini| ini.set(&section, name, 1)) {
+                        mq.chat(format!("[Posse] couldn't save that to {SETTINGS_FILE}: {e}"));
+                    }
+                    mq.chat(if created { format!("[Posse] created channel {name}") } else { format!("[Posse] channel {name} already exists") });
+                }
+                Err(e) => mq.chat(format!("[Posse] couldn't create {name}: {e}")),
+            },
+            "delete" => {
+                let members = self.channel_members(name).unwrap_or_default();
+                if !members.is_empty() {
+                    mq.chat(format!("[Posse] couldn't delete {name}: {} still in it", members.join(", ")));
+                    return;
+                }
+                let Some(connection) = &self.connection else { return };
+                if !connection.mapping.region().delete_channel(name) {
+                    mq.chat(format!("[Posse] no channel named {name}"));
+                    return;
+                }
+                if let Err(e) = settings_file(mq).and_then(|ini| ini.remove(&section, name)) {
+                    mq.chat(format!("[Posse] couldn't save that to {SETTINGS_FILE}: {e}"));
+                }
+                mq.chat(format!("[Posse] deleted channel {name}"));
+            }
+            "join" => {
+                let Some(channel) = region.channel(name) else {
+                    mq.chat(format!("[Posse] no channel named {name}. /posse channel create {name} makes one"));
+                    return;
+                };
+                match self.status.join_channel(&channel) {
+                    Ok(true) => {
+                        self.save_channel(mq, &channel, true);
+                        self.publish(mq);
+                        mq.chat(format!("[Posse] joined channel {channel}"));
+                    }
+                    Ok(false) => mq.chat(format!("[Posse] already in channel {channel}")),
+                    Err(e) => mq.chat(format!("[Posse] couldn't join {channel}: {e}")),
+                }
+            }
+            _ => {
+                if self.status.leave_channel(name) {
+                    self.save_channel(mq, name, false);
+                    self.publish(mq);
+                    mq.chat(format!("[Posse] left channel {name}"));
+                } else {
+                    mq.chat(format!("[Posse] not in channel {name}"));
+                }
+            }
+        }
+    }
+
+    fn list_channels(&self, mq: &Mq<Self>) {
+        let Some(connection) = &self.connection else { return };
+        let names = connection.mapping.region().channel_names();
+        if names.is_empty() {
+            mq.chat("[Posse] no channels. /posse channel create <name> makes one");
+            return;
+        }
+        mq.chat(format!("[Posse] channels in {}:", connection.name));
+        for name in names {
+            let members = self.channel_members(&name).unwrap_or_default();
+            mq.chat(format!("  {name}: {}", if members.is_empty() { "nobody online".to_owned() } else { members.join(", ") }));
+        }
     }
 
     fn leave(&mut self) {
@@ -253,6 +409,11 @@ impl Posse {
             "debug" if rest.trim().eq_ignore_ascii_case("on") => self.set_debug(mq, true),
             "debug" if rest.trim().eq_ignore_ascii_case("off") => self.set_debug(mq, false),
             "debug" => mq.chat(format!("[Posse] debug logging is {}. usage: /posse debug on|off", if self.debug { "on" } else { "off" })),
+            "allowcommands" => match rest.trim().to_ascii_lowercase().as_str() {
+                "true" | "on" => self.set_allow_commands(mq, true),
+                "false" | "off" => self.set_allow_commands(mq, false),
+                _ => mq.chat(format!("[Posse] AllowCommands is {}. usage: /posse allowcommands true|false", self.allow_commands)),
+            },
             "join" if !rest.trim().is_empty() => {
                 let posse = rest.trim();
                 self.left = false;
@@ -260,6 +421,7 @@ impl Posse {
                     mq.chat(format!("[Posse] joined {posse}"));
                 }
             }
+            "channel" => self.channel_command(mq, rest),
             "leave" => {
                 self.left = true;
                 self.leave();
@@ -274,31 +436,54 @@ impl Posse {
         }
     }
 
-    /// Turns debug logging on or off and saves that for this character. It
-    /// still changes for now if it can't be saved.
+    /// Turns debug logging on or off and saves that for this character.
     fn set_debug(&mut self, mq: &Mq<Self>, on: bool) {
         self.debug = on;
         mq.chat(format!("[Posse] debug logging {}", if on { "on" } else { "off" }));
+        self.save_setting(mq, "Debug", on);
+    }
+
+    /// Runs or refuses what others send from now on, and saves that for this
+    /// character.
+    fn set_allow_commands(&mut self, mq: &Mq<Self>, allow: bool) {
+        self.allow_commands = allow;
+        mq.chat(format!("[Posse] {} commands from other clients", if allow { "running" } else { "refusing" }));
+        self.save_setting(mq, "AllowCommands", allow);
+    }
+
+    /// Saves a setting for this character. It still changes for now if it can't
+    /// be saved.
+    fn save_setting(&self, mq: &Mq<Self>, key: &str, value: bool) {
         if self.settings_for.is_empty() {
             mq.chat("[Posse] couldn't save that: no character to save it for yet");
-        } else if let Err(e) = settings_file(mq).and_then(|ini| ini.set(&settings_section(mq, &self.settings_for), "Debug", on)) {
+        } else if let Err(e) = settings_file(mq).and_then(|ini| ini.set(&settings_section(mq, &self.settings_for), key, value)) {
             mq.chat(format!("[Posse] couldn't save that to {SETTINGS_FILE}: {e}"));
         }
     }
 
-    /// Handles `/pc` and the rest. The sender's own copy goes through `mq.command`
-    /// as well, so it runs on the next pulse and not in the middle of this one.
+    /// Handles `/pc` and the rest.
     fn send_command(&mut self, mq: &Mq<Self>, alias: &Alias, args: &str) {
-        let line = args.trim();
-        if !line.starts_with('/') {
-            mq.chat(format!("[Posse] usage: {} <command>, starting with /", alias.name));
+        let named = matches!(alias.scope, Scope::Name | Scope::Channel);
+        let (first, line) = if named { split_word(args) } else { ("", args.trim()) };
+        if !line.starts_with('/') || (named && first.is_empty()) {
+            mq.chat(format!("[Posse] usage: {}, starting with /", alias.usage()));
             return;
         }
         let Some(connection) = &mut self.connection else {
             mq.chat("[Posse] not in a posse");
             return;
         };
+        let mut here = alias.includes_sender;
         let audience = match alias.scope {
+            Scope::Name => {
+                connection.refresh();
+                let Some(member) = connection.roster.find(first) else {
+                    mq.chat(format!("[Posse] {first} isn't in the posse"));
+                    return;
+                };
+                here = member.owner == connection.me;
+                Audience::Names(vec![first.to_owned()])
+            }
             Scope::All => Audience::All,
             Scope::Group => {
                 let Some(group) = mq.group() else {
@@ -315,28 +500,48 @@ impl Posse {
                 Audience::Names(raid.members().map(|member| member.name()).collect())
             }
             Scope::Zone => Audience::Zone { zone: self.status.zone(), instance: self.status.zone_instance },
+            Scope::Channel => {
+                if connection.mapping.region().channel(first).is_none() {
+                    mq.chat(format!("[Posse] no channel named {first}"));
+                    return;
+                }
+                here = here && self.status.in_channel(first);
+                Audience::Channel(first.to_owned())
+            }
         };
+        self.deliver(mq, alias.name, &audience, here, line);
+    }
+
+    /// Sends a command to an audience, and runs it here too if `here` is set. The
+    /// sender's own copy goes through `mq.command` as well, so it runs on the next
+    /// pulse and not in the middle of this one.
+    fn deliver(&mut self, mq: &Mq<Self>, sent_by: &str, audience: &Audience, here: bool, line: &str) {
+        let Some(connection) = &mut self.connection else { return };
         connection.refresh();
         let region = connection.mapping.region();
-        let targets = connection.roster.targets(region, connection.me, &audience);
+        let targets = connection.roster.targets(region, connection.me, audience);
+        let sent_ms = now_ms();
+        let mut sequence = 0;
         if !targets.is_empty() {
-            if let Err(e) = region.send(connection.slot, targets, now_ms(), line) {
-                mq.chat(format!("[Posse] couldn't send: {e}"));
-                return;
+            match region.send(connection.slot, targets, sent_ms, line) {
+                Ok(sent) => sequence = sent,
+                Err(e) => {
+                    mq.chat(format!("[Posse] couldn't send: {e}"));
+                    return;
+                }
             }
-        } else if !alias.includes_sender {
+        } else if !here {
             mq.chat("[Posse] no other clients to send it to");
             return;
         }
         if self.debug {
             let names: Vec<&str> = connection.roster.members().iter().filter(|member| targets.contains(member.slot)).map(|member| member.name.as_str()).collect();
             let names = if names.is_empty() { "no other clients".to_owned() } else { names.join(", ") };
-            let here = if alias.includes_sender { ", and running it here" } else { "" };
-            mq.chat(format!("[Posse] {} sent {line} to {names}{here}", alias.name));
+            let running_here = if here { ", and running it here" } else { "" };
+            mq.chat(format!("[Posse] {sent_by} sent {line} to {names}{running_here}"));
         }
-        if alias.includes_sender {
-            run(mq, line);
-        }
+        let answer_here = here.then(|| if run(mq, line) { Answer::Ran } else { Answer::Refused });
+        connection.last_command = Some(LastCommand::new(line, sequence, targets, sent_ms, answer_here));
     }
 
     /// Runs what others have sent. Not during a load screen: those wait, and
@@ -349,17 +554,34 @@ impl Posse {
         let region = connection.mapping.region();
         let sender = |from: SlotId| region.read(from).map_or_else(|| "another client".to_owned(), |status| status.name());
         for delivery in connection.inbox.receive(region, now_ms()) {
-            if let Delivery::Run { from, text, age_ms } = &delivery {
+            if let Delivery::Run { from, text, age_ms, .. } = &delivery {
                 self.stats.commands.add(*age_ms);
                 if self.debug {
                     mq.chat(format!("[Posse] received {text} from {}, {age_ms} ms after it was sent", sender(*from)));
                 }
             }
             match delivery {
-                Delivery::Run { from, text, .. } if !self.allow_commands => mq.chat(format!("[Posse] refused {text} from {}: AllowCommands is 0", sender(from))),
-                Delivery::Run { text, .. } => run(mq, &text),
+                Delivery::Run { from, sequence, text, .. } if !self.allow_commands => {
+                    mq.chat(format!("[Posse] refused {text} from {}: AllowCommands is false", sender(from)));
+                    region.answer(connection.slot, from, sequence, Answer::Refused);
+                }
+                Delivery::Run { from, sequence, text, .. } => {
+                    let answer = if run(mq, &text) { Answer::Ran } else { Answer::Refused };
+                    region.answer(connection.slot, from, sequence, answer);
+                }
                 Delivery::TooLate { from, text, age_ms } => mq.chat(format!("[Posse] didn't run {text} from {}: it's {} s old", sender(from), age_ms / 1000)),
                 Delivery::Lost { from, count } => mq.chat(format!("[Posse] {} sent commands too fast: {count} lost, not all of them meant for this client", sender(from))),
+            }
+        }
+        for complaint in connection.complaints.check(region) {
+            if complaint.dropped > 0 {
+                mq.chat(format!("[Posse] {} dropped {} of your commands: they reached it over {} s after you sent them", sender(complaint.from), complaint.dropped, COMMAND_TIMEOUT_MS / 1000));
+            }
+            if complaint.lost > 0 {
+                mq.chat(format!("[Posse] {} lost {} commands you sent, by not reading them before they were overwritten. They may not all have been meant for it", sender(complaint.from), complaint.lost));
+                if let Some(last) = &mut connection.last_command {
+                    last.add_lost(complaint.lost);
+                }
             }
         }
     }
@@ -396,15 +618,40 @@ fn settings_file(mq: &Mq<Posse>) -> Result<Ini, IniError> {
     Ini::new(mq.config_dir().join(SETTINGS_FILE))
 }
 
+/// The server's short name, which keeps posses and settings apart per server.
+fn server(mq: &Mq<Posse>) -> String {
+    mq.server_name().unwrap_or_default()
+}
+
 fn settings_section(mq: &Mq<Posse>, character: &str) -> String {
-    format!("{}_{character}", mq.parse("${EverQuest.Server}"))
+    format!("{}_{character}", server(mq))
+}
+
+/// The section naming a posse's channels. It's shared by all characters, so
+/// that a channel outlasts the clients in it.
+fn channels_section(mq: &Mq<Posse>, posse: &str) -> String {
+    format!("Channels_{}_{posse}", server(mq))
+}
+
+/// The channels saved in a character's section.
+fn saved_channels(ini: &Ini, section: &str) -> Vec<String> {
+    ini.get(section, CHANNELS_KEY).unwrap_or_default().split(',').map(str::trim).filter(|name| !name.is_empty()).map(str::to_owned).collect()
+}
+
+/// The first word of `text`, and the rest with no spaces around it.
+fn split_word(text: &str) -> (&str, &str) {
+    let text = text.trim();
+    text.split_once(char::is_whitespace).map_or((text, ""), |(word, rest)| (word, rest.trim()))
 }
 
 /// Runs a command on the next pulse, saying so if MacroQuest won't take it.
-fn run(mq: &Mq<Posse>, line: &str) {
-    if !mq.command(line) {
+/// Returns whether it took it.
+fn run(mq: &Mq<Posse>, line: &str) -> bool {
+    let taken = mq.command(line);
+    if !taken {
         mq.chat(format!("[Posse] couldn't run {line}"));
     }
+    taken
 }
 
 fn print_help(mq: &Mq<Posse>) {
@@ -413,7 +660,7 @@ fn print_help(mq: &Mq<Posse>) {
         mq.chat(format!("  {usage}: {description}"));
     }
     for alias in &ALIASES {
-        mq.chat(format!("  {} <command>: {}", alias.name, alias.description));
+        mq.chat(format!("  {}: {}", alias.usage(), alias.description));
     }
 }
 

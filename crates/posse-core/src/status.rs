@@ -1,12 +1,20 @@
 //! The status a client publishes in its slot.
 
+use std::fmt;
+
+use crate::names::MAX_CHANNEL_NAME;
+
 pub const MAX_BUFFS: usize = 42;
 pub const MAX_SONGS: usize = 55;
+/// Channels one client can be in.
+pub const MAX_CHANNELS_PER_CLIENT: usize = 16;
 /// A client that hasn't published for this long is stale.
 pub const STALE_AFTER_MS: u64 = 3000;
 
 const NAME_LEN: usize = 64;
 const ZONE_LEN: usize = 32;
+/// The longest names with a space between each, and a terminator.
+const CHANNELS_LEN: usize = MAX_CHANNELS_PER_CLIENT * (MAX_CHANNEL_NAME + 1);
 
 /// Bits of [`Status::flags`].
 pub mod flags {
@@ -17,6 +25,15 @@ pub mod flags {
     pub const STUNNED: u32 = 1 << 4;
     pub const FEIGNING: u32 = 1 << 5;
     pub const HOVERING: u32 = 1 << 6;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TooManyChannels;
+
+impl fmt::Display for TooManyChannels {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "this client is already in {MAX_CHANNELS_PER_CLIENT} channels")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +94,8 @@ pub struct Status {
     name: [u8; NAME_LEN],
     pet_name: [u8; NAME_LEN],
     zone: [u8; ZONE_LEN],
+    /// The channels this client is in, separated by spaces.
+    channels: [u8; CHANNELS_LEN],
     pub buffs: [BuffEntry; MAX_BUFFS],
     pub songs: [BuffEntry; MAX_SONGS],
 }
@@ -116,6 +135,7 @@ impl Default for Status {
             name: [0; NAME_LEN],
             pet_name: [0; NAME_LEN],
             zone: [0; ZONE_LEN],
+            channels: [0; CHANNELS_LEN],
             buffs: [BuffEntry { spell_id: 0, ms_left: 0 }; MAX_BUFFS],
             songs: [BuffEntry { spell_id: 0, ms_left: 0 }; MAX_SONGS],
         }
@@ -184,6 +204,43 @@ impl Status {
         to_text(&mut self.zone, zone);
     }
 
+    pub fn channels(&self) -> Vec<String> {
+        from_text(&self.channels).split_whitespace().map(str::to_owned).collect()
+    }
+
+    pub fn in_channel(&self, channel: &str) -> bool {
+        self.channels().iter().any(|name| name.eq_ignore_ascii_case(channel))
+    }
+
+    /// Replaces the list, keeping only as many as fit.
+    pub fn set_channels(&mut self, channels: &[String]) {
+        let kept = &channels[..channels.len().min(MAX_CHANNELS_PER_CLIENT)];
+        to_text(&mut self.channels, &kept.join(" "));
+    }
+
+    /// Returns false if this client was already in it.
+    pub fn join_channel(&mut self, channel: &str) -> Result<bool, TooManyChannels> {
+        let mut channels = self.channels();
+        if channels.iter().any(|name| name.eq_ignore_ascii_case(channel)) {
+            return Ok(false);
+        }
+        if channels.len() >= MAX_CHANNELS_PER_CLIENT {
+            return Err(TooManyChannels);
+        }
+        channels.push(channel.to_owned());
+        self.set_channels(&channels);
+        Ok(true)
+    }
+
+    /// Returns false if this client wasn't in it.
+    pub fn leave_channel(&mut self, channel: &str) -> bool {
+        let mut channels = self.channels();
+        let before = channels.len();
+        channels.retain(|name| !name.eq_ignore_ascii_case(channel));
+        self.set_channels(&channels);
+        channels.len() != before
+    }
+
     pub fn mana_percent(&self) -> i32 {
         percent(self.mana_current, self.mana_max)
     }
@@ -230,7 +287,7 @@ mod tests {
 
     #[test]
     fn has_no_padding() {
-        let fields = 24 * 4 + NAME_LEN * 2 + ZONE_LEN + (MAX_BUFFS + MAX_SONGS) * size_of::<BuffEntry>();
+        let fields = 24 * 4 + NAME_LEN * 2 + ZONE_LEN + CHANNELS_LEN + (MAX_BUFFS + MAX_SONGS) * size_of::<BuffEntry>();
         assert_eq!(size_of::<Status>(), fields);
     }
 
@@ -243,6 +300,33 @@ mod tests {
         assert_eq!(status.zone(), "é".repeat(15));
         status.set_name("Al");
         assert_eq!(status.name(), "Al", "a shorter name leaves nothing of the longer one");
+    }
+
+    #[test]
+    fn joining_and_leaving_channels() {
+        let mut status = Status::default();
+        assert_eq!(status.channels(), Vec::<String>::new());
+        assert!(!status.in_channel("healers"));
+        assert_eq!(status.join_channel("Healers"), Ok(true));
+        assert_eq!(status.join_channel("tanks"), Ok(true));
+        assert_eq!(status.join_channel("HEALERS"), Ok(false), "already in it, in another case");
+        assert_eq!(status.channels(), ["Healers", "tanks"]);
+        assert!(status.in_channel("healers"));
+        assert!(!status.in_channel("heal"), "not a match on part of a name");
+        assert!(status.leave_channel("HEALERS"));
+        assert!(!status.leave_channel("healers"), "already left");
+        assert_eq!(status.channels(), ["tanks"]);
+    }
+
+    #[test]
+    fn as_many_channels_as_allowed_fit_at_the_longest_names_and_no_more() {
+        let name = |n: usize| format!("{n:0>width$}", width = MAX_CHANNEL_NAME);
+        let mut status = Status::default();
+        for n in 0..MAX_CHANNELS_PER_CLIENT {
+            assert_eq!(status.join_channel(&name(n)), Ok(true));
+        }
+        assert_eq!(status.join_channel(&name(MAX_CHANNELS_PER_CLIENT)), Err(TooManyChannels));
+        assert_eq!(status.channels(), (0..MAX_CHANNELS_PER_CLIENT).map(name).collect::<Vec<_>>());
     }
 
     #[test]

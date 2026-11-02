@@ -20,8 +20,7 @@ game.
 - [x] Crash and exit detection by holding a handle to each peer's process, checked every 100 ms
 - [x] `.Age` and `.Stale`, measured on the clock all clients share
 - [x] `Posse` TLO: `Count`, `Members`, `Member[x]`, `[x]`
-- [x] Member type: `GameState`, `Zone`, `TargetID`, `Age`, `Stale`, `Spawn`, and the always-ready `Me`
-      members listed in the README, as plain values for now (`Class.ShortName` and the like need phase 3)
+- [x] Member type: `GameState`, `Zone`, `TargetID`, `Age`, `Stale`, `Spawn`, and the always-ready `Me` members listed in the README, as plain values for now (`Class.ShortName` and the like need phase 3)
 - [x] A clear chat error when the shared memory can't be opened
 - [x] `/posse list` and `/posse stats`
 - [x] `MQ2Posse.ini` settings `Posse` and `AutoJoin`
@@ -38,26 +37,25 @@ game.
 - [x] Measure status latency, including a client at a low frame rate: 16 ms average and 34 ms worst at its
       normal rate, 48 ms and 100 ms at 10 fps
 
-### 2. Messages and commands
+### 2. Commands
 
-- [ ] `/posse tell`, the inbox and `/posse next`
-- [x] `/pc`, `/pca`, `/pgc`, `/pgca`, `/prc`, `/prca`, `/pzc` and `/pzca`, tested outside the game
+- [x] `/pca`, `/pcaa`, `/pgc`, `/pgca`, `/prc`, `/prca`, `/pzc` and `/pzca`, tested outside the game (named `/pc` and `/pca` until `/pc` became the command to a name)
 - [x] All eight run in game on three clients, in a group and a raid
 - [x] Measure how long commands take to arrive: 2 to 103 ms over 7 samples, from the debug log
 - [x] `/pzc` and `/pzca` in game, including instances
-- [x] `AllowCommands=0` refusing a command in game
-- [ ] Seen in game as they come up, since they're hard to set up on purpose: a command dropped after
-      5 seconds, and lost commands. Tests outside the game cover both
+- [x] `AllowCommands=0` refusing a command in game, before it became `true` or `false`
+- [ ] Seen in game as they come up, since they can't be set up on purpose: a command dropped after 5 seconds, `.TimedOut` and `.Dropped` in `${Posse.LastCommand}`, and lost commands. Zoning takes under 5 seconds, so a load screen doesn't cause them. Tests outside the game cover all of these
 - [x] `/posse help`, with a test that every command in it is in the README
 - [x] `AllowCommands` setting in `MQ2Posse.ini`
-- [x] `/posse debug on` and `off`, showing what's sent and received in game, and `Debug` in
-      `MQ2Posse.ini` keeping it on through a reload
+- [x] `/posse allowcommands true` and `false`, saved like `Debug` through a reload, and `AllowCommands=false` refusing a command in game
+- [x] `/posse debug on` and `off`, showing what's sent and received in game, and `Debug` in `MQ2Posse.ini` keeping it on through a reload
 - [x] Dropping a command after 5 seconds, and saying so on the client that dropped it
 - [x] A client saying so when commands were overwritten before it read them
-- [ ] `/posse cmd` to a name
-- [ ] Completion tracking in `${Posse.LastCommand}`, which can also tell the sender about dropped and
-      lost commands
-- [ ] Named groupings of clients, like DanNet's channels, and commands sent to a grouping
+- [x] `/pc` to a name, tested outside the game
+- [x] Completion tracking in `${Posse.LastCommand}`, which also tells the sender about dropped and lost commands, tested outside the game
+- [x] `.Spawn` NULL for a member in another instance of your zone, checked in game
+- [x] Named channels of clients, like DanNet's channels: creating, joining, leaving, deleting and listing them, saving them in `MQ2Posse.ini`, and `/pnc` and `/pnca` to send to one, tested outside the game
+- [x] All of the last three run in game on three clients, including `.Pending` while a target zoned and channels coming back after every client restarted
 
 ### 3. Generic `Me` passthrough
 
@@ -83,7 +81,7 @@ Built on mq-emu's `DataTypeDef::any_member`.
 - [x] Tests of the shared memory between real processes: killing a client, reusing its slot, and
       mappings from another build
 - [x] The same for commands
-- [ ] The same for message queues and path validation, with phases 2 and 3
+- [ ] The same for path validation, with phase 3
 - [ ] In-game checks with several clients: reloading the plugin on one client, a burst of commands, a
       mismatched build
 - [x] A check with one client limited to a low frame rate
@@ -109,7 +107,7 @@ belongs in the plugin, not in the bindings.
 - Clients under different Windows users, at different elevation, or in a sandbox.
 - Protection from other programs running as your Windows user.
 - Lua messaging through `mq.actors`. Lua reads the `Posse` TLO and uses `/posse` commands instead.
-- Calling methods through a remote `Me`. Use `/posse cmd`.
+- Calling methods through a remote `Me`. Use `/pc`.
 - Reading another plugin's added `Me` members from Lua, since they aren't on the generated list.
   Macros can read them.
 - Waiting for a value within a read: a read can't block, so an unread path returns NULL at first.
