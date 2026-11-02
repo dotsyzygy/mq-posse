@@ -285,7 +285,7 @@ impl Audience {
 
 /// The slots a command is addressed to.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Targets(u64);
+pub struct Targets(pub(crate) u64);
 
 const _: () = assert!(MAX_CLIENTS <= u64::BITS as usize);
 

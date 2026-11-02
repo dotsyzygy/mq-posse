@@ -53,21 +53,23 @@ Phase 1 is finished and has run on two clients in game. Build order is the numbe
 
 Built on mq-emu's `DataTypeDef::any_member`.
 
-- [ ] Any `Me` path on a member, returning NULL until its first value arrives, including `State`, which is `${Me.State}` and not the member's `GameState`
-- [ ] A generated, committed list of MacroQuest's member names (about 1,100, extracted from `ScopedTypeMember` in its `datatypes/*.cpp`) for `any_member`, since Lua can read only listed names
-- [ ] Returning real ints, floats and bools once a value is cached
-- [ ] Requests and results in the owner's slot, with path validation (relative to `Me`, no `${`)
-- [ ] Per-pulse evaluation budget, with each path re-evaluated no more often than every `max(10 x its evaluation cost, 100 ms)`
-- [ ] Reading a path starts evaluating it, with no separate command for that
-- [ ] Paths unread for 30 seconds stop being evaluated but keep their last value, and the next read returns that value and starts evaluating again
-- [ ] A way for a macro to see how old a path's value is, since `.Age` only covers the member's status
+- [x] Any `Me` path on a member, returning NULL until its first value arrives, including `State`, which is `${Me.State}` and not the member's `GameState`
+- [x] A generated, committed list of MacroQuest's member names (1,135, extracted from `ScopedTypeMember` in its `datatypes/*.cpp`) for `any_member`, since Lua can read only listed names: mq-emu 0.1.4's `MACROQUEST_MEMBERS`, with `MACROQUEST_METHODS` for refusing methods
+- [x] Returning real ints, floats and bools once a value is cached
+- [x] Requests and results in shared memory, each in the slot of the client writing it (a reader's requests in its own, an owner's values in its own), with path validation (relative to `Me`, no `${`, no methods) on both sides
+- [x] Per-pulse evaluation budget, with each path re-evaluated no more often than every `max(10 x its evaluation cost, 100 ms)`
+- [x] Reading a path starts evaluating it, with no separate command for that
+- [x] Paths unread for 30 seconds stop being evaluated but keep their last value, and the next read returns that value and starts evaluating again
+- [x] A way for a macro to see how old a path's value is, since `.Age` only covers the member's status: `.PathAge[path]`
+- [x] The same on `.Pet` and `.Buff`/`.Song` values, for their members MQ2Posse doesn't publish
+- [ ] All of the above checked in game on two clients, including Lua reading typed values and a method being refused
 
 ### 4. Hardening
 
 - [x] Unit tests of slots, sequence counter and roster in a separate pure Rust crate, since the plugin crate can't run tests outside the game; failure cases are permanent negative tests
 - [x] Tests of the shared memory between real processes: killing a client, reusing its slot, and mappings from another build
 - [x] The same for commands
-- [ ] The same for path validation, with phase 3
+- [x] The same for path validation, with phase 3
 - [ ] In-game checks with several clients: reloading the plugin on one client, a burst of commands, a mismatched build
 - [x] A check with one client limited to a low frame rate
 

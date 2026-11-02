@@ -196,7 +196,7 @@ A member isn't MacroQuest's `character` type, which can only read the local char
 /echo ${Posse[Bob].AltAbilityReady[Divine Arbitration]}
 ```
 
-A path nothing has read for 30 seconds stops being evaluated, but its last value is kept. The next read returns that value, which may be out of date, and starts evaluating the path again. Paths are relative to `Me` and can't contain `${`.
+A path nothing has read for 30 seconds stops being evaluated, but its last value is kept. The next read returns that value, which may be out of date, and starts evaluating the path again. Paths are relative to `Me` and can't contain `${`. `${Posse[Bob].PathAge[PctAggro]}` says how many milliseconds old a path's value is, without asking for it. [docs/tlo.md](docs/tlo.md#any-other-me-path) has the details.
 
 ### In a macro
 

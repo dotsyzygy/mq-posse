@@ -1,10 +1,11 @@
 //! The `Posse` TLO and its datatypes. `docs/tlo.md` documents every member, and
 //! a test in `posse-core` fails if the two list different ones.
 
-use mq_emu::{DataType, DataTypeDef, DataTypeError, Mq, SpawnId, SpellId, TloError, Value};
+use mq_emu::{DataType, DataTypeDef, DataTypeError, MACROQUEST_MEMBERS, Mq, SpawnId, SpellId, TloError, Value};
 use posse_core::{BuffEntry, State, Status, compass, flags};
 
 use crate::Posse;
+use crate::paths::step;
 use posse_shm::now_ms;
 
 const NO_PET: &str = "NO PET";
@@ -14,9 +15,30 @@ pub struct Types {
     member: DataType<String>,
     pet: DataType<String>,
     buff: DataType<String>,
+    path: DataType<String>,
     channel: DataType<String>,
     last_command: DataType<()>,
     posse: DataType<()>,
+}
+
+/// `posse_member`'s own members, which its catch-all doesn't list. A test in
+/// `posse-core` fails if this and the members added below differ.
+const MEMBER_OWN: &[&str] = &[
+    "GameState", "Zone", "TargetID", "Age", "Stale", "PathAge", "Spawn", "Class", "Race", "Casting", "Pet", "Buff", "Song", "Name", "Channels", "ID",
+    "Level", "PctHPs", "CurrentHPs", "MaxHPs", "PctMana", "CurrentMana", "MaxMana", "PctEndurance", "CurrentEndurance", "MaxEndurance", "X", "Y",
+    "Z", "Heading", "CountBuffs", "CountSongs", "Combat", "Sitting", "Moving", "Invis", "Stunned", "Feigning", "Hovering",
+];
+const PET_OWN: &[&str] = &["ID", "Name", "PctHPs"];
+const BUFF_OWN: &[&str] = &["ID", "Name", "Spell", "Duration"];
+
+/// MacroQuest's member names but `own`, for a catch-all to list for Lua.
+fn catch_all_names(own: &[&str]) -> Vec<&'static str> {
+    MACROQUEST_MEMBERS.iter().copied().filter(|name| !own.contains(name)).collect()
+}
+
+/// A `posse_path` value's key: the member and the path.
+fn path_key(member: &str, path: &str) -> String {
+    format!("{member}\n{path}")
 }
 
 /// Which of a member's two buff lists a `posse_buff` value is in.
@@ -37,12 +59,17 @@ fn buff_key(name: &str, list: List, slot: usize) -> String {
 
 /// The buff a `posse_buff` key names, with how old its status is.
 fn lookup_buff(plugin: &Posse, key: &str) -> Option<(BuffEntry, u64, usize)> {
-    let mut parts = key.split('\n');
-    let (name, list, slot) = (parts.next()?, parts.next()?, parts.next()?.parse::<usize>().ok()?);
+    let (name, list, slot) = split_buff_key(key)?;
     let status = plugin.status_of(name)?;
     let entries: &[BuffEntry] = if list == "b" { &status.buffs } else { &status.songs };
     let entry = *entries.get(slot)?;
     (!entry.is_empty()).then(|| (entry, status.age_ms(now_ms()), slot))
+}
+
+/// A `posse_buff` key's character, list (`b` or `s`) and slot.
+fn split_buff_key(key: &str) -> Option<(&str, &str, usize)> {
+    let mut parts = key.split('\n');
+    Some((parts.next()?, parts.next()?, parts.next()?.parse().ok()?))
 }
 
 /// `Buff[n or name]`: a slot counted from 1, or the first with that spell.
@@ -85,6 +112,7 @@ fn add_member_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
         .member("TargetID", |plugin, _, name, _| Some(plugin.status_of(name)?.target_id.into()))
         .member("Age", |plugin, _, name, _| Some(i64::try_from(plugin.status_of(name)?.age_ms(now_ms())).ok()?.into()))
         .member("Stale", |plugin, _, name, _| Some(plugin.status_of(name)?.is_stale(now_ms()).into()))
+        .member("PathAge", |plugin, _, name, index| plugin.path_age(name, index))
         .member("Spawn", |plugin, mq, name, _| {
             let status = plugin.status_of(name)?;
             let here = mq.zone()?;
@@ -108,6 +136,7 @@ fn add_member_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
             let slot = find_buff(mq, &status.songs, index)?;
             Some(plugin.types.as_ref()?.buff.value(buff_key(name, List::Songs, slot)))
         })
+        .any_member(&catch_all_names(MEMBER_OWN), |plugin, _, name, member, index| plugin.path_value(name, &step(member, index)))
         .text(|_, _, name| name.clone());
     def = field(def, "Name", |status| Some(status.name().into()));
     def = field(def, "Channels", |status| Some(status.channels().join(" ").into()));
@@ -146,6 +175,7 @@ fn add_pet_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
             Some(if status.pet_id == 0 { NO_PET.into() } else { status.pet_name().into() })
         })
         .member("PctHPs", |plugin, _, name, _| Some(plugin.status_of(name)?.pet_hp_percent.into()))
+        .any_member(&catch_all_names(PET_OWN), |plugin, _, name, member, index| plugin.path_value(name, &format!("Pet.{}", step(member, index))))
         .text(|plugin, _, name| plugin.status_of(name).filter(|status| status.pet_id != 0).map_or(NO_PET.to_owned(), |status| status.pet_name()));
     mq.add_type("posse_pet", def)
 }
@@ -159,8 +189,25 @@ fn add_buff_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
             let (entry, age, _) = lookup_buff(plugin, key)?;
             Some(entry.ms_left_after(age)?.into())
         })
+        .any_member(&catch_all_names(BUFF_OWN), |plugin, _, key, member, index| {
+            let (name, list, slot) = split_buff_key(key)?;
+            let list = if list == "b" { "Buff" } else { "Song" };
+            plugin.path_value(name, &format!("{list}[{}].{}", slot + 1, step(member, index)))
+        })
         .text(|plugin, mq, key| lookup_buff(plugin, key).and_then(|(entry, _, _)| spell_name(mq, entry.spell_id)).unwrap_or_default());
     mq.add_type("posse_buff", def)
+}
+
+/// A value of one of MacroQuest's other types (`spawn`, `buff`...) read from
+/// a member's `${Me}`: its text, and any member of it is the path gone on.
+fn add_path_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
+    let def = DataTypeDef::new()
+        .any_member(MACROQUEST_MEMBERS, |plugin: &mut Posse, _, key: &String, member, index| {
+            let (name, path) = key.split_once('\n')?;
+            plugin.path_value(name, &format!("{path}.{}", step(member, index)))
+        })
+        .text(|plugin, _, key| key.split_once('\n').map_or(String::new(), |(name, path)| plugin.path_text(name, path)));
+    mq.add_type("posse_path", def)
 }
 
 /// A channel, by the name it was created with.
@@ -213,6 +260,7 @@ pub fn add(mq: &Mq<Posse>) -> Result<Types, String> {
         member: add_member_type(mq).map_err(describe)?,
         pet: add_pet_type(mq).map_err(describe)?,
         buff: add_buff_type(mq).map_err(describe)?,
+        path: add_path_type(mq).map_err(describe)?,
         channel: add_channel_type(mq).map_err(describe)?,
         last_command: add_last_command_type(mq).map_err(describe)?,
         posse: add_posse_type(mq).map_err(describe)?,
@@ -228,5 +276,9 @@ pub fn add(mq: &Mq<Posse>) -> Result<Types, String> {
 impl Types {
     pub fn member_value(&self, name: String) -> Value {
         self.member.value(name)
+    }
+
+    pub fn path_value(&self, member: &str, path: &str) -> Value {
+        self.path.value(path_key(member, path))
     }
 }

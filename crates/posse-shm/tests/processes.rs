@@ -7,7 +7,7 @@ use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use posse_core::{Answer, Audience, AttachError, Delivery, Inbox, LAYOUT_VERSION, LastCommand, Liveness, Owner, REGION_SIZE, Roster, Status};
+use posse_core::{Answer, Audience, AttachError, Delivery, Evaluator, Inbox, LAYOUT_VERSION, LastCommand, Liveness, Owner, PathValue, REGION_SIZE, Reader, Roster, Status, parse_path};
 use posse_shm::{Mapping, OpenError, Processes, now_ms, this_process};
 use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Memory::{CreateFileMappingW, FILE_MAP_ALL_ACCESS, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, PAGE_READWRITE, UnmapViewOfFile};
@@ -20,6 +20,8 @@ const WAIT: Duration = Duration::from_secs(10);
 /// Not a test: the other client, when run by `spawn_client`. It joins and
 /// publishes until it's killed, as a game client does. It "runs" a command by
 /// publishing it as its zone and answering, so the test can see that it did.
+/// It "evaluates" a path asked of it as its name and the path, or NULL for a
+/// path it refuses, as the plugin does.
 #[test]
 fn other_client() {
     let (Ok(mapping), Ok(name)) = (env::var(CHILD_MAPPING), env::var(CHILD_NAME)) else { return };
@@ -32,7 +34,13 @@ fn other_client() {
         status.join_channel(&channel).unwrap();
     }
     let mut inbox = Inbox::new(mapping.region(), slot);
+    let (mut evaluator, mut processes) = (Evaluator::default(), Processes::default());
     loop {
+        evaluator.refresh(mapping.region(), slot, &mut processes);
+        for path in evaluator.due(now_ms()) {
+            let value = parse_path(&path).map_or(PathValue::Null, |_| PathValue::String(format!("{name} {path}")));
+            evaluator.record(mapping.region(), slot, &path, value, now_ms(), Duration::from_micros(10));
+        }
         for delivery in inbox.receive(mapping.region(), now_ms()) {
             if let Delivery::Run { from, sequence, text, .. } = delivery {
                 status.set_zone(&text);
@@ -140,6 +148,35 @@ fn a_command_reaches_only_the_client_addressed_across_processes() {
     let published = roster.read(region, "Cleric").unwrap().published_ms();
     wait_for("Cleric to read its log after the send", || roster.read(region, "Cleric").is_some_and(|status| status.published_ms() > published));
     assert_eq!(roster.read(region, "Cleric").unwrap().zone(), "", "the command wasn't for Cleric");
+}
+
+#[test]
+fn a_path_is_evaluated_by_the_client_asked_and_a_refused_one_is_null_across_processes() {
+    let name = unique("paths");
+    let mapping = Mapping::open(&name).unwrap();
+    let region = mapping.region();
+    let mut processes = Processes::default();
+    let slot = region.claim(this_process().unwrap(), &mut processes).unwrap();
+    let _bob = spawn_client(&name, "Bob");
+    let _cleric = spawn_client(&name, "Cleric");
+    let mut roster = Roster::default();
+    wait_for("both clients", || {
+        roster.refresh(region, &mut processes);
+        roster.members().len() == 2
+    });
+
+    let mut reader = Reader::default();
+    let read = |reader: &mut Reader, path: &str| reader.read("Bob", path, now_ms()).map(|result| result.value.clone());
+    assert_eq!(read(&mut reader, "Inventory[mainhand].Name"), None, "NULL until it arrives");
+    // Refused by the reader in the plugin, so sent here only to show the owner refuses it too.
+    read(&mut reader, "Buff[${Me.Level}]");
+    wait_for("both values", || {
+        reader.refresh(region, slot, |name| Some(roster.find(name)?.slot), now_ms());
+        reader.peek("Bob", "Inventory[mainhand].Name").is_some() && reader.peek("Bob", "Buff[${Me.Level}]").is_some()
+    });
+    assert_eq!(read(&mut reader, "Inventory[mainhand].Name"), Some(PathValue::String("Bob Inventory[mainhand].Name".into())));
+    assert_eq!(read(&mut reader, "Buff[${Me.Level}]"), Some(PathValue::Null));
+    assert!(region.results(roster.find("Cleric").unwrap().slot).is_empty(), "nothing was asked of Cleric");
 }
 
 #[test]

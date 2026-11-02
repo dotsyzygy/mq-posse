@@ -70,11 +70,39 @@ fn every_member_in_the_source_is_documented_and_nothing_else_is() {
 fn the_real_source_and_doc_are_read_properly() {
     for members in [members_in_source(TLO_SOURCE), members_in_doc(TLO_DOC)] {
         let names: Vec<&str> = members.keys().map(String::as_str).collect();
-        assert_eq!(names, ["posse", "posse_buff", "posse_channel", "posse_last_command", "posse_member", "posse_pet"]);
+        assert_eq!(names, ["posse", "posse_buff", "posse_channel", "posse_last_command", "posse_member", "posse_path", "posse_pet"]);
         for (name, member) in [("posse", "Channel"), ("posse_member", "GameState"), ("posse_member", "Name"), ("posse_member", "Combat"), ("posse_member", "Buff"), ("posse_last_command", "TimedOut")] {
             assert!(members[name].contains(member), "{name}.{member}");
         }
     }
+}
+
+/// The names in a `const NAME: &[&str] = &[...];` list.
+fn own_list(source: &str, constant: &str) -> BTreeSet<String> {
+    let after = source.split(&format!("const {constant}: &[&str] = &[")).nth(1).unwrap_or_default();
+    after.split("];").next().unwrap_or_default().split('"').skip(1).step_by(2).map(str::to_owned).collect()
+}
+
+const OWN_LISTS: [(&str, &str); 3] = [("MEMBER_OWN", "posse_member"), ("PET_OWN", "posse_pet"), ("BUFF_OWN", "posse_buff")];
+
+/// Each catch-all leaves out exactly its type's own members: `any_member`
+/// refuses a list with one of them, and a name left out needlessly is one of
+/// MacroQuest's that Lua can't read.
+#[test]
+fn each_catch_all_leaves_out_exactly_its_types_members() {
+    let members = members_in_source(TLO_SOURCE);
+    for (constant, type_name) in OWN_LISTS {
+        assert_eq!(own_list(TLO_SOURCE, constant), members[type_name], "{constant}");
+    }
+}
+
+/// Negative: a member added without being added to its list is caught.
+#[test]
+fn a_member_missing_from_its_list_is_caught() {
+    let source = TLO_SOURCE.replacen("\"PathAge\", ", "", 1);
+    assert_ne!(source, TLO_SOURCE, "the list has PathAge to remove");
+    let members = members_in_source(&source);
+    assert_ne!(own_list(&source, "MEMBER_OWN"), members["posse_member"]);
 }
 
 const SOURCE: &str = r#"

@@ -8,6 +8,7 @@ Every member the `Posse` TLO has today, for macros and Lua. The [README](../READ
 - **NULL** is what a read gives when the thing it asks for isn't there, and `nil` in Lua.
 - **Character and channel names** match in any case, so `${Posse[bob]}` is `${Posse[Bob]}`.
 - **How fresh:** a client publishes its status each pulse, so values are as old as `.Age` says. The list of who's online is rebuilt every 100 ms, so a member who has just joined can take that long to appear.
+- **Other `${Me}` paths** on a member are read from that character's client: see [Any other `${Me}` path](#any-other-me-path).
 
 ## `Posse`
 
@@ -32,6 +33,8 @@ Shows as the posse's name.
 ## `posse_member`
 
 Shows as the member's name. Members named after one of `${Me}`'s read the same as that character's `${Me}`, except as noted. Your own entry reads what you last published, like anyone else's.
+
+Any name not in these tables is read from the character's own `${Me}`: see [Any other `${Me}` path](#any-other-me-path).
 
 Every member here is NULL once that character is no longer online. While it's on a load screen, these keep their last values, and `.GameState` says so.
 
@@ -97,6 +100,7 @@ The state of its data, which `${Me}` doesn't have:
 | `.GameState` | `string` | `InGame` or `Zoning`. Not `.State`, which on `${Me}` means `STAND`, `SIT` and so on |
 | `.Age` | `int` | Milliseconds since this client last published |
 | `.Stale` | `bool` | True if `.Age` is over 3 seconds |
+| `.PathAge[PctAggro]` | `int` | Milliseconds since that path's last value was evaluated on its client, or NULL if none has arrived. Reading this doesn't ask for the path. Only for paths without an index: MacroQuest ends the index at the first `]`, so `.PathAge[Inventory[mainhand].Name]` is NULL |
 
 ## `posse_pet`
 
@@ -108,6 +112,8 @@ Shows as the pet's name, or `NO PET`.
 | `.Name` | `string` | Its internal name, as `${Me.Pet.Name}` shows it, or `NO PET` |
 | `.PctHPs` | `int` | Its hit points, as a percentage, or 0 for no pet |
 
+Any other member, such as `.Level`, is `${Me.Pet.Level}` on the character's client, as [below](#any-other-me-path).
+
 ## `posse_buff`
 
 A buff or song. Shows as its spell's name.
@@ -118,6 +124,23 @@ A buff or song. Shows as its spell's name.
 | `.Name` | `string` | Its spell's name |
 | `.Spell` | `spell` | Its spell |
 | `.Duration` | `int` | Milliseconds left, or NULL if it doesn't wear off. Unlike `${Me.Buff[x].Duration}` this is a plain number, so it has no members such as `.TotalSeconds` |
+
+Any other member, such as `.Caster`, is `${Me.Buff[n].Caster}` (or `Song`) on the character's client for the buff's slot, as [below](#any-other-me-path).
+
+## Any other `${Me}` path
+
+`${Posse[Bob].State}`, `${Posse[Bob].Inventory[mainhand].Name}` or `${Posse[Bob].AltAbilityReady[Lay on Hands]}` is `${Me.State}`, `${Me.Inventory[mainhand].Name}` or `${Me.AltAbilityReady[Lay on Hands]}` on Bob's client. `.State` is `${Me.State}` (STAND, SIT...), not the member's game state, which is `.GameState`.
+
+- **NULL until its first value arrives.** Reading a path asks Bob's client for it, and its value arrives within about 100 ms. A macro reading a path once gets NULL: read it again, or wait for `.PathAge[path]`. A path of several steps can take one wait per step, as each step is asked for when it's reached.
+- **Typed values:** numbers, bools and strings are MacroQuest's `int`, `float`, `bool` and `string`, with their members (`.PctHPs.Float`), and real numbers in Lua. Any other type is a `posse_path`.
+- **How fresh:** each path is evaluated again every 100 ms, or every 10 times what it took to evaluate if that's longer. Bob's client spends at most 1 ms a pulse on them. `.PathAge[path]` says how old a value is.
+- **Kept when unread:** a path unread for 30 seconds stops being evaluated, but keeps its last value. The next read returns that value and asks for the path again.
+- **What can be read:** names of MacroQuest's own types only, as Lua reads only listed names. Methods, which act (`.Sit`, `.DoTarget`, `.Buff[1].Remove`), are NULL. So are paths longer than 128 bytes, and indexes with `${` left in them after the macro's own parsing.
+- **Limits:** a client asks for its 64 most recently read paths, and evaluates up to 128 for all its readers. Text longer than 256 bytes is cut short.
+
+## `posse_path`
+
+A value of one of MacroQuest's other types, such as `spawn` or `buff`, read from a member's `${Me}`. Shows as that value's text, and any member of it goes on with the path: `${Posse[Bob].Inventory[mainhand].Name}` is `${Me.Inventory[mainhand].Name}`. It has no members of its own.
 
 ## `posse_channel`
 
@@ -149,9 +172,3 @@ Each target is counted in exactly one of `.Pending`, `.Done`, `.Refused`, `.Drop
 | `.Dropped` | `int` | Targets that got it too late to run it |
 | `.TimedOut` | `int` | Targets not heard from after 5 seconds: stalled, on a long load screen, or gone. One that gets to it later moves to `.Dropped` |
 | `.Lost` | `int` | A count of commands and not targets: earlier commands that targets have reported losing since this one was sent. They may have been addressed to other clients |
-
-## Not built yet
-
-These are in the [README](../README.md) as the plan, but read as NULL today. Their state is in [status.md](status.md).
-
-- Any other `${Me}` member on a member, such as `${Posse[Bob].AltAbilityReady[...]}`, from phase 3.

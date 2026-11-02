@@ -11,12 +11,13 @@ use std::sync::atomic::{AtomicU32, Ordering, fence};
 
 use crate::channels::ChannelTable;
 use crate::commands::{CommandLog, Reply};
+use crate::paths::PathTables;
 use crate::status::{STATUS_WORDS, Status};
 
 /// Clients with a different layout refuse to share a block. Change this with
-/// any change to [`Region`], [`Status`], the channel table, the command log or
-/// the replies.
-pub const LAYOUT_VERSION: u32 = 0x5053_0003;
+/// any change to [`Region`], [`Status`], the channel table, the command log,
+/// the replies or the path tables.
+pub const LAYOUT_VERSION: u32 = 0x5053_0004;
 pub const MAX_CLIENTS: usize = 64;
 pub const REGION_SIZE: usize = size_of::<Region>();
 
@@ -80,6 +81,8 @@ struct Slot {
     /// never reset: the sender matches an answer to a sequence number, and counts
     /// how far its totals have moved.
     replies: [Reply; MAX_CLIENTS],
+    /// The paths this client asks others for, and the values of those asked of it.
+    paths: PathTables,
 }
 
 #[repr(C)]
@@ -190,6 +193,10 @@ impl Region {
         &self.slots[id.0].replies[to.0]
     }
 
+    pub(crate) fn paths(&self, id: SlotId) -> &PathTables {
+        &self.slots[id.0].paths
+    }
+
     /// Slots that have an owner, with their owners.
     pub(crate) fn owners(&self) -> impl Iterator<Item = (SlotId, Owner)> + '_ {
         self.slots.iter().enumerate().filter_map(|(i, slot)| Some((SlotId(i), slot.owner()?)))
@@ -213,6 +220,7 @@ impl Slot {
             return false;
         }
         self.sequence.store(0, Ordering::Release);
+        self.paths.clear();
         self.started_low.store(me.started as u32, Ordering::Relaxed);
         self.started_high.store((me.started >> 32) as u32, Ordering::Relaxed);
         self.pid.store(me.pid, Ordering::Release);
@@ -251,6 +259,11 @@ pub(crate) mod tests {
 
     pub(crate) fn owner(pid: u32) -> Owner {
         Owner { pid, started: u64::from(pid) * 1000 }
+    }
+
+    /// Leaves a slot's first result as a writer stopped partway through it leaves it.
+    pub(crate) fn stop_mid_write_paths(region: &Region, slot: SlotId) {
+        region.slots[slot.0].paths.stop_first_result_mid_write();
     }
 
     /// Leaves a slot as a writer stopped partway through publishing leaves it.

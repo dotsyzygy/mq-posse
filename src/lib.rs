@@ -1,5 +1,6 @@
 #![allow(non_snake_case)] // the crate is named after the DLL
 
+mod paths;
 mod publish;
 mod tlo;
 
@@ -7,7 +8,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use mq_emu::{green, red, teal, yellow, GameState, Ini, IniError, Mq, Plugin, Value};
-use posse_core::{ALIASES, Alias, Answer, Audience, Complaints, Delivery, HELP, HelpTopic, Inbox, LastCommand, Owner, Roster, SUBCOMMANDS, Scope, SlotId, State, Status, Tally, COMMAND_TIMEOUT_MS, mapping_name, validate_channel_name, validate_posse_name};
+use posse_core::{ALIASES, Alias, Answer, Audience, Complaints, Delivery, Evaluator, HELP, HelpTopic, Inbox, LastCommand, Owner, PathValue, Reader, Roster, SUBCOMMANDS, Scope, SlotId, State, Status, Tally, COMMAND_TIMEOUT_MS, mapping_name, validate_channel_name, validate_posse_name};
 
 use posse_shm::{Mapping, Processes, now_ms, this_process};
 use tlo::Types;
@@ -36,11 +37,19 @@ struct Connection {
     last_command: Option<LastCommand>,
     processes: Processes,
     refreshed: Instant,
+    /// The `Me` paths this client reads from others.
+    reader: Reader,
+    /// The `Me` paths others read from this client.
+    evaluator: Evaluator,
 }
 
 impl Connection {
     fn refresh(&mut self) {
-        self.roster.refresh(self.mapping.region(), &mut self.processes);
+        let region = self.mapping.region();
+        self.roster.refresh(region, &mut self.processes);
+        let roster = &self.roster;
+        self.reader.refresh(region, self.slot, |name| Some(roster.find(name)?.slot), now_ms());
+        self.evaluator.refresh(region, self.slot, &mut self.processes);
         self.refreshed = Instant::now();
     }
 }
@@ -116,6 +125,7 @@ impl Plugin for Posse {
         }
         self.publish(mq);
         self.run_commands(mq);
+        self.evaluate_paths(mq);
     }
 
     fn on_set_game_state(&mut self, mq: &Mq<Self>, state: GameState) {
@@ -168,6 +178,49 @@ impl Posse {
     fn member_value(&self, name: &str) -> Option<Value> {
         let member = self.connection.as_ref()?.roster.find(name)?;
         Some(self.types.as_ref()?.member_value(member.name.clone()))
+    }
+
+    /// `${Posse.Member[Bob].<path>}`, which is `${Me.<path>}` on Bob's client:
+    /// NULL until its first value arrives, then the last value. A value that
+    /// isn't a number, bool or string is a `posse_path`, for the path to go on.
+    fn path_value(&mut self, member: &str, path: &str) -> Option<Value> {
+        let steps = posse_core::parse_path(path).ok()?;
+        if steps.iter().any(|step| paths::only_a_method(&step.name)) {
+            return None;
+        }
+        let connection = self.connection.as_mut()?;
+        match &connection.reader.read(member, path, now_ms())?.value {
+            PathValue::Null => None,
+            PathValue::Int(n) => Some((*n).into()),
+            PathValue::Float(x) => Some((*x).into()),
+            PathValue::Bool(b) => Some((*b).into()),
+            PathValue::String(text) => Some(text.as_str().into()),
+            PathValue::Object(_) => Some(self.types.as_ref()?.path_value(member, path)),
+        }
+    }
+
+    /// How a `posse_path` shows: its last value's text.
+    fn path_text(&self, member: &str, path: &str) -> String {
+        let Some(result) = self.connection.as_ref().and_then(|connection| connection.reader.peek(member, path)) else { return String::new() };
+        match &result.value {
+            PathValue::Object(text) | PathValue::String(text) => text.clone(),
+            _ => String::new(),
+        }
+    }
+
+    /// `.PathAge[path]`: how old the path's last value is, in ms, without reading it.
+    fn path_age(&self, member: &str, path: &str) -> Option<Value> {
+        let result = self.connection.as_ref()?.reader.peek(member, path)?;
+        Some(i64::try_from(result.age_ms(now_ms())).ok()?.into())
+    }
+
+    /// Evaluates the paths others want from this client, in game only.
+    fn evaluate_paths(&mut self, mq: &Mq<Self>) {
+        if self.zoning || mq.game_state() != GameState::InGame || mq.me().is_none() {
+            return;
+        }
+        let Some(connection) = &mut self.connection else { return };
+        paths::evaluate_due(mq, &mut connection.evaluator, connection.mapping.region(), connection.slot);
     }
 
     fn publish(&mut self, mq: &Mq<Self>) {
@@ -254,7 +307,7 @@ impl Posse {
         let slot = mapping.region().claim(me, &mut processes).map_err(|_| "the posse is full")?;
         let inbox = Inbox::new(mapping.region(), slot);
         let complaints = Complaints::new(mapping.region(), slot);
-        self.connection = Some(Connection { name: posse.to_owned(), mapping, slot, me, roster: Roster::default(), inbox, complaints, last_command: None, processes, refreshed: Instant::now() });
+        self.connection = Some(Connection { name: posse.to_owned(), mapping, slot, me, roster: Roster::default(), inbox, complaints, last_command: None, processes, refreshed: Instant::now(), reader: Reader::default(), evaluator: Evaluator::default() });
         Ok(())
     }
 
@@ -611,6 +664,9 @@ impl Posse {
         }
         let commands = &self.stats.commands;
         mq.chat(format!("  commands from others: {} ms to arrive on average, {} ms at worst, {} received", commands.total_ms / commands.samples.max(1), commands.worst_ms, commands.samples));
+        if let Some(connection) = &self.connection {
+            mq.chat(format!("  Me paths: asking others for {}, evaluating {} for others", connection.reader.wanted(), connection.evaluator.len()));
+        }
     }
 }
 
