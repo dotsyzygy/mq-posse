@@ -8,17 +8,14 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use mq_emu::{green, red, teal, yellow, GameState, Ini, IniError, Mq, Plugin, Value};
-use posse_core::{ALIASES, Alias, Answer, Audience, Complaints, Delivery, Evaluator, HELP, HelpTopic, Inbox, LastCommand, Owner, PathValue, Reader, Roster, SUBCOMMANDS, Scope, SlotId, State, Status, Tally, COMMAND_TIMEOUT_MS, mapping_name, validate_channel_name, validate_posse_name};
+use posse_core::{ALIASES, Alias, Answer, Audience, Complaints, Delivery, Evaluator, HELP, HelpTopic, Inbox, LastCommand, Owner, PathValue, Reader, Roster, SUBCOMMANDS, Scope, SlotId, State, Status, Tally, COMMAND_TIMEOUT_MS, DEFAULT_SECTION, SETTINGS_FILE, auto_join_posse, mapping_name, validate_channel_name, validate_posse_name};
 
 use posse_shm::{Mapping, Processes, now_ms, this_process};
 use tlo::Types;
 
 const COMMAND: &str = "/posse";
-const DEFAULT_POSSE: &str = "default";
-const DEFAULT_SECTION: &str = "Default";
 const USAGE: &str = "usage: /posse [help [all | <topic>] | list | join <name> | leave | channel [list | create|delete|join|leave <name>] | allowcommands true|false | debug on|off | stats [reset]]";
 const CHANNEL_USAGE: &str = "usage: /posse channel [list | create <name> | delete <name> | join <name> | leave <name>]";
-const SETTINGS_FILE: &str = "MQ2Posse.ini";
 /// The key in a character's section listing the channels it's in.
 const CHANNELS_KEY: &str = "Channels";
 /// How often to check who's alive. Each check asks Windows about every member,
@@ -268,12 +265,12 @@ impl Posse {
         if self.left {
             return;
         }
-        let auto_join = read("AutoJoin").is_none_or(|value| value != "0");
-        let posse = read("Posse").unwrap_or_else(|| DEFAULT_POSSE.to_owned());
-        if !auto_join {
-            self.leave();
-        } else if self.connection.as_ref().is_none_or(|connection| !connection.name.eq_ignore_ascii_case(&posse)) {
-            self.join(mq, &posse);
+        match auto_join_posse(read) {
+            None => self.leave(),
+            Some(posse) if self.connection.as_ref().is_none_or(|connection| !connection.name.eq_ignore_ascii_case(&posse)) => {
+                self.join(mq, &posse);
+            }
+            Some(_) => {}
         }
     }
 
@@ -680,7 +677,7 @@ fn server(mq: &Mq<Posse>) -> String {
 }
 
 fn settings_section(mq: &Mq<Posse>, character: &str) -> String {
-    format!("{}_{character}", server(mq))
+    posse_core::settings_section(&server(mq), character)
 }
 
 /// The section naming a posse's channels. It's shared by all characters, so

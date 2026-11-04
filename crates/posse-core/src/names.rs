@@ -33,6 +33,25 @@ pub fn validate_channel_name(name: &str) -> Result<(), InvalidChannelName> {
     if valid { Ok(()) } else { Err(InvalidChannelName) }
 }
 
+/// MQ2Posse's settings, in MacroQuest's config folder.
+pub const SETTINGS_FILE: &str = "MQ2Posse.ini";
+/// The section with every character's defaults.
+pub const DEFAULT_SECTION: &str = "Default";
+pub const DEFAULT_POSSE: &str = "default";
+
+/// A character's own section of [`SETTINGS_FILE`].
+pub fn settings_section(server: &str, character: &str) -> String {
+    format!("{server}_{character}")
+}
+
+/// The posse a character joins as it comes into the game, from `read`, which
+/// gives a setting from its section or else [`DEFAULT_SECTION`]. `None` for
+/// `AutoJoin=0`.
+pub fn auto_join_posse(read: impl Fn(&str) -> Option<String>) -> Option<String> {
+    let auto_join = read("AutoJoin").is_none_or(|value| value != "0");
+    auto_join.then(|| read("Posse").unwrap_or_else(|| DEFAULT_POSSE.to_owned()))
+}
+
 /// The name of a posse's shared memory. Windows matches these names by case,
 /// so a posse's name is lowered: "Raid" and "raid" are one posse.
 pub fn mapping_name(server: &str, posse: &str) -> String {
@@ -49,6 +68,15 @@ pub fn compass(degrees: f32) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_join_picks_the_posse_unless_it_is_off() {
+        let settings = |pairs: &'static [(&'static str, &'static str)]| move |key: &str| pairs.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string());
+        assert_eq!(auto_join_posse(settings(&[])), Some("default".into()));
+        assert_eq!(auto_join_posse(settings(&[("Posse", "raid"), ("AutoJoin", "1")])), Some("raid".into()));
+        assert_eq!(auto_join_posse(settings(&[("Posse", "raid"), ("AutoJoin", "0")])), None);
+        assert_eq!(settings_section("pfeq", "Bob"), "pfeq_Bob");
+    }
 
     #[test]
     fn posse_names() {
