@@ -18,6 +18,7 @@ const CHANNELS_LEN: usize = MAX_CHANNELS_PER_CLIENT * (MAX_CHANNEL_NAME + 1);
 
 /// Bits of [`Status::flags`].
 pub mod flags {
+    /// Auto attack is on (`${Me.Combat}`), not the combat state.
     pub const COMBAT: u32 = 1 << 0;
     pub const SITTING: u32 = 1 << 1;
     pub const MOVING: u32 = 1 << 2;

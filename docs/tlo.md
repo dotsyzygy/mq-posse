@@ -73,7 +73,7 @@ Condition:
 
 | Member | Type | Meaning |
 |---|---|---|
-| `.Combat` | `bool` | In combat |
+| `.Combat` | `bool` | Auto attack is on, like `${Me.Combat}`; not the combat state |
 | `.Sitting` | `bool` | Sitting |
 | `.Moving` | `bool` | Moving |
 | `.Invis` | `bool` | Invisible |
