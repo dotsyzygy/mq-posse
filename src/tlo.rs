@@ -24,7 +24,7 @@ pub struct Types {
 /// `posse_member`'s own members, which its catch-all doesn't list. A test in
 /// `posse-core` fails if this and the members added below differ.
 const MEMBER_OWN: &[&str] = &[
-    "GameState", "Zone", "TargetID", "Age", "Stale", "PathAge", "Spawn", "Class", "Race", "Casting", "Pet", "Buff", "Song", "Name", "Channels", "ID",
+    "GameState", "Zone", "TargetID", "TargetPctHPs", "Age", "Stale", "PathAge", "Spawn", "Class", "Race", "Casting", "Pet", "Buff", "Song", "Name", "Channels", "ID",
     "Level", "PctHPs", "CurrentHPs", "MaxHPs", "PctMana", "CurrentMana", "MaxMana", "PctEndurance", "CurrentEndurance", "MaxEndurance", "X", "Y",
     "Z", "Heading", "CountBuffs", "CountSongs", "Combat", "Sitting", "Moving", "Invis", "Stunned", "Feigning", "Hovering",
 ];
@@ -110,6 +110,7 @@ fn add_member_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
         .member("GameState", |plugin: &mut Posse, _, name: &String, _| Some(plugin.status_of(name)?.state().as_str().into()))
         .member("Zone", |plugin, _, name, _| Some(plugin.status_of(name)?.zone().into()))
         .member("TargetID", |plugin, _, name, _| Some(plugin.status_of(name)?.target_id.into()))
+        .member("TargetPctHPs", |plugin, _, name, _| Some(plugin.status_of(name)?.target_hp_percent.into()))
         .member("Age", |plugin, _, name, _| Some(i64::try_from(plugin.status_of(name)?.age_ms(now_ms())).ok()?.into()))
         .member("Stale", |plugin, _, name, _| Some(plugin.status_of(name)?.is_stale(now_ms()).into()))
         .member("PathAge", |plugin, _, name, index| plugin.path_age(name, index))

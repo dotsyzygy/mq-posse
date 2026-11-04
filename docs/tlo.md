@@ -53,6 +53,7 @@ Who and where:
 | `.Z` | `float` | Its Z position |
 | `.Heading` | `string` | The compass point it's facing, such as `NNE`. Only text for now, so `.Heading.Degrees` doesn't work |
 | `.TargetID` | `int` | The spawn ID of its target, or 0 for none. `${Me}` doesn't have this |
+| `.TargetPctHPs` | `int` | Its target's HP%, as its own client sees it (0 for no target). Truer than this client's copy of a mob it hasn't targeted. `${Me}` doesn't have this |
 | `.Spawn` | `spawn` | MacroQuest's spawn for it, or NULL unless it's in game in your zone and the same instance of it |
 
 Vitals:

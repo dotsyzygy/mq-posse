@@ -34,6 +34,7 @@ pub fn collect(mq: &Mq<Posse>, status: &mut Status, zoning: bool) {
     status.heading_degrees = me.heading().degrees();
     status.casting = me.casting().map_or(0, |spell| spell.0);
     status.target_id = mq.target().map_or(0, |target| target.id().0);
+    status.target_hp_percent = mq.target().map_or(0, |target| target.hp_percent());
     if let Some(zone) = mq.zone() {
         status.set_zone(&zone.short_name());
         status.zone_instance = u32::from(zone.instance());
