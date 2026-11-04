@@ -6,6 +6,8 @@ use crate::names::MAX_CHANNEL_NAME;
 
 pub const MAX_BUFFS: usize = 42;
 pub const MAX_SONGS: usize = 55;
+/// A pet's buff slots on RoF2.
+pub const MAX_PET_BUFFS: usize = 30;
 /// Channels one client can be in.
 pub const MAX_CHANNELS_PER_CLIENT: usize = 16;
 /// A client that hasn't published for this long is stale.
@@ -102,6 +104,8 @@ pub struct Status {
     channels: [u8; CHANNELS_LEN],
     pub buffs: [BuffEntry; MAX_BUFFS],
     pub songs: [BuffEntry; MAX_SONGS],
+    /// Its pet's buffs, by pet window slot. Empty without a pet.
+    pub pet_buffs: [BuffEntry; MAX_PET_BUFFS],
 }
 
 const _: () = assert!(align_of::<Status>() == 4 && size_of::<Status>().is_multiple_of(4));
@@ -143,6 +147,7 @@ impl Default for Status {
             channels: [0; CHANNELS_LEN],
             buffs: [BuffEntry { spell_id: 0, ms_left: 0 }; MAX_BUFFS],
             songs: [BuffEntry { spell_id: 0, ms_left: 0 }; MAX_SONGS],
+            pet_buffs: [BuffEntry { spell_id: 0, ms_left: 0 }; MAX_PET_BUFFS],
         }
     }
 }
@@ -292,7 +297,7 @@ mod tests {
 
     #[test]
     fn has_no_padding() {
-        let fields = 25 * 4 + NAME_LEN * 2 + ZONE_LEN + CHANNELS_LEN + (MAX_BUFFS + MAX_SONGS) * size_of::<BuffEntry>();
+        let fields = 25 * 4 + NAME_LEN * 2 + ZONE_LEN + CHANNELS_LEN + (MAX_BUFFS + MAX_SONGS + MAX_PET_BUFFS) * size_of::<BuffEntry>();
         assert_eq!(size_of::<Status>(), fields);
     }
 

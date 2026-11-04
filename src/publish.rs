@@ -1,7 +1,7 @@
 //! Reads this client's status from the game.
 
 use mq_emu::{GameState, Mq};
-use posse_core::{BuffEntry, MAX_BUFFS, MAX_SONGS, State, Status, flags};
+use posse_core::{BuffEntry, MAX_BUFFS, MAX_PET_BUFFS, MAX_SONGS, State, Status, flags};
 
 use crate::Posse;
 
@@ -72,6 +72,13 @@ pub fn collect(mq: &Mq<Posse>, status: &mut Status, zoning: bool) {
     for song in mq.songs() {
         if let Some(entry) = status.songs.get_mut(song.slot()) {
             *entry = BuffEntry { spell_id: song.spell_id().0, ms_left: ms_left(song.ticks()) };
+        }
+    }
+    status.pet_buffs = [BuffEntry { spell_id: 0, ms_left: 0 }; MAX_PET_BUFFS];
+    for buff in mq.pet_buffs() {
+        if let Some(entry) = status.pet_buffs.get_mut(buff.slot()) {
+            let ms_left = buff.remaining().map_or(-1, |left| left.as_millis().min(i32::MAX as u128) as i32);
+            *entry = BuffEntry { spell_id: buff.spell_id().0, ms_left };
         }
     }
 }

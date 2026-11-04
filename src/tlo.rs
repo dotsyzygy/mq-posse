@@ -28,7 +28,7 @@ const MEMBER_OWN: &[&str] = &[
     "Level", "PctHPs", "CurrentHPs", "MaxHPs", "PctMana", "CurrentMana", "MaxMana", "PctEndurance", "CurrentEndurance", "MaxEndurance", "X", "Y",
     "Z", "Heading", "CountBuffs", "CountSongs", "Combat", "Sitting", "Moving", "Invis", "Stunned", "Feigning", "Hovering",
 ];
-const PET_OWN: &[&str] = &["ID", "Name", "PctHPs"];
+const PET_OWN: &[&str] = &["ID", "Name", "PctHPs", "Buff", "CountBuffs"];
 const BUFF_OWN: &[&str] = &["ID", "Name", "Spell", "Duration"];
 
 /// MacroQuest's member names but `own`, for a catch-all to list for Lua.
@@ -41,11 +41,12 @@ fn path_key(member: &str, path: &str) -> String {
     format!("{member}\n{path}")
 }
 
-/// Which of a member's two buff lists a `posse_buff` value is in.
+/// Which of a member's buff lists a `posse_buff` value is in.
 #[derive(Clone, Copy)]
 enum List {
     Buffs,
     Songs,
+    PetBuffs,
 }
 
 /// A `posse_buff` value's key: the character, the list and the slot.
@@ -53,6 +54,7 @@ fn buff_key(name: &str, list: List, slot: usize) -> String {
     let list = match list {
         List::Buffs => 'b',
         List::Songs => 's',
+        List::PetBuffs => 'p',
     };
     format!("{name}\n{list}\n{slot}")
 }
@@ -61,12 +63,16 @@ fn buff_key(name: &str, list: List, slot: usize) -> String {
 fn lookup_buff(plugin: &Posse, key: &str) -> Option<(BuffEntry, u64, usize)> {
     let (name, list, slot) = split_buff_key(key)?;
     let status = plugin.status_of(name)?;
-    let entries: &[BuffEntry] = if list == "b" { &status.buffs } else { &status.songs };
+    let entries: &[BuffEntry] = match list {
+        "b" => &status.buffs,
+        "s" => &status.songs,
+        _ => &status.pet_buffs,
+    };
     let entry = *entries.get(slot)?;
     (!entry.is_empty()).then(|| (entry, status.age_ms(now_ms()), slot))
 }
 
-/// A `posse_buff` key's character, list (`b` or `s`) and slot.
+/// A `posse_buff` key's character, list (`b`, `s` or `p`) and slot.
 fn split_buff_key(key: &str) -> Option<(&str, &str, usize)> {
     let mut parts = key.split('\n');
     Some((parts.next()?, parts.next()?, parts.next()?.parse().ok()?))
@@ -176,6 +182,12 @@ fn add_pet_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
             Some(if status.pet_id == 0 { NO_PET.into() } else { status.pet_name().into() })
         })
         .member("PctHPs", |plugin, _, name, _| Some(plugin.status_of(name)?.pet_hp_percent.into()))
+        .member("Buff", |plugin, mq, name, index| {
+            let status = plugin.status_of(name)?;
+            let slot = find_buff(mq, &status.pet_buffs, index)?;
+            Some(plugin.types.as_ref()?.buff.value(buff_key(name, List::PetBuffs, slot)))
+        })
+        .member("CountBuffs", |plugin, _, name, _| Some((plugin.status_of(name)?.pet_buffs.iter().filter(|entry| !entry.is_empty()).count() as u32).into()))
         .any_member(&catch_all_names(PET_OWN), |plugin, _, name, member, index| plugin.path_value(name, &format!("Pet.{}", step(member, index))))
         .text(|plugin, _, name| plugin.status_of(name).filter(|status| status.pet_id != 0).map_or(NO_PET.to_owned(), |status| status.pet_name()));
     mq.add_type("posse_pet", def)
@@ -192,7 +204,11 @@ fn add_buff_type(mq: &Mq<Posse>) -> Result<DataType<String>, DataTypeError> {
         })
         .any_member(&catch_all_names(BUFF_OWN), |plugin, _, key, member, index| {
             let (name, list, slot) = split_buff_key(key)?;
-            let list = if list == "b" { "Buff" } else { "Song" };
+            let list = match list {
+                "b" => "Buff",
+                "s" => "Song",
+                _ => "Pet.Buff",
+            };
             plugin.path_value(name, &format!("{list}[{}].{}", slot + 1, step(member, index)))
         })
         .text(|plugin, mq, key| lookup_buff(plugin, key).and_then(|(entry, _, _)| spell_name(mq, entry.spell_id)).unwrap_or_default());

@@ -17,7 +17,7 @@ use crate::status::{STATUS_WORDS, Status};
 /// Clients with a different layout refuse to share a block. Change this with
 /// any change to [`Region`], [`Status`], the channel table, the command log,
 /// the replies or the path tables.
-pub const LAYOUT_VERSION: u32 = 0x5053_0005;
+pub const LAYOUT_VERSION: u32 = 0x5053_0006;
 pub const MAX_CLIENTS: usize = 64;
 pub const REGION_SIZE: usize = size_of::<Region>();
 

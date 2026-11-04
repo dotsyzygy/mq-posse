@@ -112,12 +112,14 @@ Shows as the pet's name, or `NO PET`.
 | `.ID` | `int` | Its spawn ID, or 0 for no pet |
 | `.Name` | `string` | Its internal name, as `${Me.Pet.Name}` shows it, or `NO PET` |
 | `.PctHPs` | `int` | Its hit points, as a percentage, or 0 for no pet |
+| `.Buff[n or name]` | `posse_buff` | The buff in that pet window slot, counted from 1, or the first with that spell's exact name. NULL if there's none |
+| `.CountBuffs` | `int` | How many buffs it has |
 
 Any other member, such as `.Level`, is `${Me.Pet.Level}` on the character's client, as [below](#any-other-me-path).
 
 ## `posse_buff`
 
-A buff or song. Shows as its spell's name.
+A buff, song or pet buff. Shows as its spell's name.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -126,7 +128,7 @@ A buff or song. Shows as its spell's name.
 | `.Spell` | `spell` | Its spell |
 | `.Duration` | `int` | Milliseconds left, or NULL if it doesn't wear off. Unlike `${Me.Buff[x].Duration}` this is a plain number, so it has no members such as `.TotalSeconds` |
 
-Any other member, such as `.Caster`, is `${Me.Buff[n].Caster}` (or `Song`) on the character's client for the buff's slot, as [below](#any-other-me-path).
+Any other member, such as `.Caster`, is `${Me.Buff[n].Caster}` (or `Song`, or `Pet.Buff`) on the character's client for the buff's slot, as [below](#any-other-me-path).
 
 ## Any other `${Me}` path
 
