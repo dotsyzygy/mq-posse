@@ -15,6 +15,6 @@ test = false             # a plugin links MacroQuest, so a test binary can't sta
 doctest = false
 
 [dependencies]
-mq-emu = { git = "https://github.com/dotsyzygy/mq-emu-rs", tag = "v0.1.4" }
+mq-emu = { git = "https://github.com/dotsyzygy/mq-emu-rs", tag = "v0.2.0" }
 posse-core = { path = "crates/posse-core" }
 posse-shm = { path = "crates/posse-shm" }

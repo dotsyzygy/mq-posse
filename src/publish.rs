@@ -41,7 +41,7 @@ pub fn collect(mq: &Mq<Posse>, status: &mut Status, zoning: bool) {
     }
 
     let states = [
-        (mq.in_combat(), flags::COMBAT),
+        (mq.is_auto_attacking(), flags::COMBAT),
         (me.is_sitting(), flags::SITTING),
         (me.is_moving(), flags::MOVING),
         (me.is_invisible(), flags::INVIS),

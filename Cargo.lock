@@ -13,6 +13,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "eq-client"
+version = "0.2.0"
+source = "git+https://github.com/dotsyzygy/mq-emu-rs?tag=v0.2.0#e47c796799529ba6e0885d61f2b239add0775d5e"
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -20,16 +25,17 @@ checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
 name = "mq-emu"
-version = "0.1.4"
-source = "git+https://github.com/dotsyzygy/mq-emu-rs?tag=v0.1.4#df4aa90dae7695ff39094aa486016dc73661982b"
+version = "0.2.0"
+source = "git+https://github.com/dotsyzygy/mq-emu-rs?tag=v0.2.0#e47c796799529ba6e0885d61f2b239add0775d5e"
 dependencies = [
+ "eq-client",
  "mq-emu-sys",
 ]
 
 [[package]]
 name = "mq-emu-sys"
-version = "0.1.4"
-source = "git+https://github.com/dotsyzygy/mq-emu-rs?tag=v0.1.4#df4aa90dae7695ff39094aa486016dc73661982b"
+version = "0.2.0"
+source = "git+https://github.com/dotsyzygy/mq-emu-rs?tag=v0.2.0#e47c796799529ba6e0885d61f2b239add0775d5e"
 dependencies = [
  "cc",
 ]
